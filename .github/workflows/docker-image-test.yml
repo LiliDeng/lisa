@@ -1,0 +1,65 @@
+name: Test Build Docker Image (no publish)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'security/**'
+
+jobs:
+  test-build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Linux Docker Image (no push)
+        run: |
+          docker build -t lisa-runtime-test:local -f installers/Dockerfile.linux .
+
+      - name: Verify package versions for security fixes
+        run: |
+          set -e
+          echo "=== Pillow ==="
+          docker run --rm --entrypoint sh lisa-runtime-test:local -c \
+            'pip show Pillow | grep ^Version'
+          echo "=== requests ==="
+          docker run --rm --entrypoint sh lisa-runtime-test:local -c \
+            'pip show requests | grep ^Version'
+          echo "=== cryptography ==="
+          docker run --rm --entrypoint sh lisa-runtime-test:local -c \
+            'pip show cryptography | grep ^Version'
+          echo "=== PyJWT (Azure CLI vendored) ==="
+          docker run --rm --entrypoint sh lisa-runtime-test:local -c \
+            'PYTHONPATH=/usr/lib/az/lib/python3.12/site-packages python3 -c "import jwt; print(jwt.__version__)"'
+          echo "=== azcopy ==="
+          docker run --rm --entrypoint sh lisa-runtime-test:local -c \
+            'azcopy --version'
+
+      - name: Assert minimum versions
+        run: |
+          set -e
+          fail=0
+          check() {
+            name=$1; min=$2; got=$3
+            # version compare: sort -V
+            if [ "$(printf '%s\n%s\n' "$min" "$got" | sort -V | head -1)" = "$min" ]; then
+              echo "OK  $name $got >= $min"
+            else
+              echo "FAIL $name $got < $min"; fail=1
+            fi
+          }
+          PILLOW=$(docker run --rm --entrypoint sh lisa-runtime-test:local -c 'pip show Pillow | awk "/^Version:/ {print \$2}"')
+          REQ=$(docker run --rm --entrypoint sh lisa-runtime-test:local -c 'pip show requests | awk "/^Version:/ {print \$2}"')
+          CRYPTO=$(docker run --rm --entrypoint sh lisa-runtime-test:local -c 'pip show cryptography | awk "/^Version:/ {print \$2}"')
+          PYJWT=$(docker run --rm --entrypoint sh lisa-runtime-test:local -c 'PYTHONPATH=/usr/lib/az/lib/python3.12/site-packages python3 -c "import jwt; print(jwt.__version__)"')
+          AZCOPY=$(docker run --rm --entrypoint sh lisa-runtime-test:local -c 'azcopy --version | awk "{print \$3}"')
+
+          check Pillow       12.1.1  "$PILLOW"
+          check requests     2.33.0  "$REQ"
+          check cryptography 46.0.7  "$CRYPTO"
+          check PyJWT        2.12.0  "$PYJWT"
+          check azcopy       10.32.4 "$AZCOPY"
+
+          exit $fail
