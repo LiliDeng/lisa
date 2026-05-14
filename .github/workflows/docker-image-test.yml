@@ -14,6 +14,33 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Patch Dockerfile to use checked-out code (not latest release)
+        run: |
+          # Replace the git-clone-latest-release step with COPY of the current tree.
+          # This ensures we test the pyproject.toml from THIS branch, not the latest tagged release.
+          python3 - <<'PY'
+          import re
+          p = 'installers/Dockerfile.linux'
+          s = open(p).read()
+          new = re.sub(
+              r'RUN git clone --depth 1 --branch \$\(curl[^\n]*\n[^\n]*\n[^\n]*\)\s*https://github\.com/microsoft/lisa\.git\s+/app/lisa',
+              'COPY . /app/lisa',
+              s,
+              flags=re.DOTALL,
+          )
+          if new == s:
+              # fallback for single-line variant
+              new = re.sub(
+                  r'RUN git clone[^\n]*microsoft/lisa\.git[^\n]*',
+                  'COPY . /app/lisa',
+                  s,
+              )
+          assert new != s, 'Failed to patch Dockerfile'
+          open(p, 'w').write(new)
+          print('--- patched ---')
+          print(new)
+          PY
+
       - name: Build Linux Docker Image (no push)
         run: |
           docker build -t lisa-runtime-test:local -f installers/Dockerfile.linux .
