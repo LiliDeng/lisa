@@ -1,0 +1,20 @@
+trigger:
+- main
+
+pr:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+- checkout: self
+
+- script: |
+    echo "Azure DevOps is running!"
+    python3 --version
+  displayName: Verify Pipeline
+
+- script: |
+    echo "Pipeline completed successfully."
+  displayName: Finish
