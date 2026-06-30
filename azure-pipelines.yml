@@ -25,31 +25,6 @@ steps:
 - checkout: self
   fetchDepth: 0
 
-- script: |
-    echo "=== Check gh ==="
-    gh --version
-
-    echo ""
-    echo "=== Environment ==="
-    echo "GH_TOKEN=${GH_TOKEN:+SET}"
-    echo "GITHUB_TOKEN=${GITHUB_TOKEN:+SET}"
-    echo "SYSTEM_ACCESSTOKEN=${SYSTEM_ACCESSTOKEN:+SET}"
-
-    echo ""
-    echo "=== Auth Status (GH_TOKEN) ==="
-    gh auth status || true
-
-    echo ""
-    echo "=== Call GitHub API (GH_TOKEN) ==="
-    gh api user || true
-
-    echo ""
-    echo "=== Try GitHub API with System.AccessToken ==="
-    GH_TOKEN="$SYSTEM_ACCESSTOKEN" gh api user || true
-  displayName: Test GitHub CLI
-  env:
-    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
-
 - task: UsePythonVersion@0
   displayName: Use Python $(pythonVersion)
   inputs:
@@ -64,6 +39,89 @@ steps:
     python -m pip install --upgrade pip
     pip install -e ".[azure]"
   displayName: Install LISA
+
+- script: |
+
+    set -euo pipefail
+
+    TARGET="$(System.PullRequest.TargetBranch)"
+    TARGET="${TARGET#refs/heads/}"
+
+    echo "Target branch: $TARGET"
+
+    git fetch origin "$TARGET"
+
+    BASE=$(git merge-base HEAD origin/$TARGET)
+
+    echo "Merge base: $BASE"
+
+    git diff --name-only "$BASE"...HEAD \
+      | tee /tmp/changed_files.txt
+
+    git diff "$BASE"...HEAD \
+      > /tmp/pr_diff.txt
+
+    echo ""
+    echo "Changed files:"
+    cat /tmp/changed_files.txt
+
+    echo ""
+
+    echo "Changed file count:"
+    wc -l /tmp/changed_files.txt
+
+    echo ""
+
+    echo "Diff size:"
+    wc -c /tmp/pr_diff.txt
+
+  displayName: Generate PR Diff
+
+- script: |
+
+    export PR_CHANGED_FILES="$(cat /tmp/changed_files.txt)"
+
+    export PR_DIFF="$(head -c 30000 /tmp/pr_diff.txt)"
+
+    export RUNBOOK_OUTPUT="ai_selected_cases.yml"
+
+    python .github/scripts/ai_select_cases.py
+
+  displayName: AI Select Test Cases
+
+- script: |
+
+    python <<'PY'
+
+    import yaml
+
+    with open("ai_selected_cases.yml") as f:
+        rb = yaml.safe_load(f)
+
+    cases = []
+
+    image = ""
+
+    variables = rb.get("variable", [])
+
+    for v in variables:
+        if v.get("name") == "marketplace_image":
+            image = v.get("value", "")
+
+    for t in rb.get("testcase", []):
+        c = t.get("criteria", {}).get("name")
+        if c:
+            cases.append(c)
+
+    print("Selected:", cases)
+
+    print(f"##vso[task.setvariable variable=CASE_NAMES]{','.join(cases)}")
+    print(f"##vso[task.setvariable variable=CASE_COUNT]{len(cases)}")
+    print(f"##vso[task.setvariable variable=MARKETPLACE_IMAGE]{image}")
+
+    PY
+
+  displayName: Read AI Selection
 
 - task: AzureCLI@2
   displayName: Login to Azure using OIDC
@@ -88,15 +146,33 @@ steps:
       echo "##vso[task.setvariable variable=ARM_TOKEN;issecret=true]$ARM_TOKEN"
 
 - script: |
-    echo "Running LISA..."
+    echo "Selected $(CASE_COUNT) test cases."
+  displayName: Summary
+
+- script: |
+    echo "No test case selected."
+    exit 0
+  displayName: Skip
+  condition: eq(variables['CASE_COUNT'], '0')
+
+- script: |
+
+    CASE_PATTERN=$(echo "$(CASE_NAMES)" | tr ',' '|')
+
+    echo "Running:"
+    echo "$CASE_PATTERN"
 
     lisa \
       -r $(runbook) \
       -v "subscription_id:$(SUBSCRIPTION_ID)" \
       -v "location:$(location)" \
+      -v "marketplace_image:$(MARKETPLACE_IMAGE)" \
+      -v "test_case_name:$CASE_PATTERN" \
       -v "auth_type:token" \
       -v "s:azure_arm_access_token:$(ARM_TOKEN)"
-  displayName: Run LISA
+
+  displayName: Run Selected LISA Tests
+  condition: ne(variables['CASE_COUNT'], '0')
 
 - task: PublishTestResults@2
   displayName: Publish JUnit Results
@@ -113,3 +189,10 @@ steps:
   inputs:
     PathtoPublish: runtime
     ArtifactName: lisa-runtime
+
+- task: PublishBuildArtifacts@1
+  displayName: Publish AI Selection
+  condition: always()
+  inputs:
+    PathtoPublish: ai_selected_cases.yml
+    ArtifactName: ai-selected-runbook
