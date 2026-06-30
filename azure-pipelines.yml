@@ -1,20 +1,85 @@
-trigger:
-- main
+trigger: none
 
 pr:
-- main
+  branches:
+    include:
+      - main
 
 pool:
   vmImage: ubuntu-latest
 
+variables:
+  pythonVersion: '3.12'
+
+  # Replace with your Azure DevOps Service Connection name
+  azureServiceConnection: 'lisa_connection'
+
+  # Replace with your LISA runbook
+  runbook: 'lisa/microsoft/runbook/azure.yml'
+
+  # Azure region
+  location: 'westus3'
+
 steps:
+
 - checkout: self
+  fetchDepth: 0
+
+- task: UsePythonVersion@0
+  displayName: Use Python $(pythonVersion)
+  inputs:
+    versionSpec: $(pythonVersion)
 
 - script: |
-    echo "Azure DevOps is running!"
-    python3 --version
-  displayName: Verify Pipeline
+    python -m pip install --upgrade pip
+    pip install -e ".[azure]"
+  displayName: Install LISA
+
+- task: AzureCLI@2
+  displayName: Login to Azure using OIDC
+  inputs:
+    azureSubscription: $(azureServiceConnection)
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+      set -e
+
+      echo "Current Azure Account:"
+      az account show
+
+      SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+
+      ARM_TOKEN=$(az account get-access-token \
+        --resource https://management.azure.com/ \
+        --query accessToken \
+        -o tsv)
+
+      echo "##vso[task.setvariable variable=SUBSCRIPTION_ID]$SUBSCRIPTION_ID"
+      echo "##vso[task.setvariable variable=ARM_TOKEN;issecret=true]$ARM_TOKEN"
 
 - script: |
-    echo "Pipeline completed successfully."
-  displayName: Finish
+    echo "Running LISA..."
+
+    lisa \
+      -r $(runbook) \
+      -v "subscription_id:$(SUBSCRIPTION_ID)" \
+      -v "location:$(location)" \
+      -v "auth_type:token" \
+      -v "s:azure_arm_access_token:$(ARM_TOKEN)"
+  displayName: Run LISA
+
+- task: PublishTestResults@2
+  displayName: Publish JUnit Results
+  condition: always()
+  inputs:
+    testResultsFormat: JUnit
+    testResultsFiles: '**/lisa.junit.xml'
+    failTaskOnFailedTests: false
+    testRunTitle: 'LISA Test Results'
+
+- task: PublishBuildArtifacts@1
+  displayName: Publish Runtime Artifacts
+  condition: always()
+  inputs:
+    PathtoPublish: runtime
+    ArtifactName: lisa-runtime
