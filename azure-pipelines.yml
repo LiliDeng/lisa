@@ -25,6 +25,24 @@ steps:
 - checkout: self
   fetchDepth: 0
 
+- script: |
+    echo "=== Check gh ==="
+    gh --version
+
+    echo ""
+    echo "=== Environment ==="
+    echo "GH_TOKEN=${GH_TOKEN:+SET}"
+    echo "GITHUB_TOKEN=${GITHUB_TOKEN:+SET}"
+
+    echo ""
+    echo "=== Auth Status ==="
+    gh auth status || true
+
+    echo ""
+    echo "=== Call GitHub API ==="
+    gh api user
+  displayName: Test GitHub CLI
+
 - task: UsePythonVersion@0
   displayName: Use Python $(pythonVersion)
   inputs:
