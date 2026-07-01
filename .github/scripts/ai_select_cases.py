@@ -874,6 +874,29 @@ def get_tool_related_cases(
     return related_cases
 
 
+SELECTION_SYSTEM_PROMPT = (
+    "You are a test selection expert for the LISA Linux VM "
+    "test framework. Given a PR diff and a list of available "
+    "test cases, select the test cases that should be run to "
+    "validate the changes. Consider:\n"
+    "- Which test areas are affected by the changed files\n"
+    "- Which test cases directly test the changed functionality\n"
+    "- Select only cases impacted by the modified code\n"
+    "- Use smoke_test only when no impacted case can be found\n"
+    "- Include related integration tests\n"
+    "- Be conservative: include cases that MIGHT be affected\n"
+    "Return ONLY a JSON array of test case names, no explanation."
+)
+
+
+def _selection_messages(prompt: str) -> List[Dict[str, str]]:
+    """Build the shared chat messages for model-based test selection."""
+    return [
+        {"role": "system", "content": SELECTION_SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
+
+
 def call_github_models(prompt: str, token: str) -> str:
     """Call GitHub Models API (OpenAI-compatible) and return the response text."""
     import urllib.request
@@ -885,32 +908,62 @@ def call_github_models(prompt: str, token: str) -> str:
     }
     payload = {
         "model": "openai/gpt-4o",
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are a test selection expert for the LISA Linux VM "
-                    "test framework. Given a PR diff and a list of available "
-                    "test cases, select the test cases that should be run to "
-                    "validate the changes. Consider:\n"
-                    "- Which test areas are affected by the changed files\n"
-                    "- Which test cases directly test the changed functionality\n"
-                    "- Select only cases impacted by the modified code\n"
-                    "- Use smoke_test only when no impacted case can be found\n"
-                    "- Include related integration tests\n"
-                    "- Be conservative: include cases that MIGHT be affected\n"
-                    "Return ONLY a JSON array of test case names, no explanation."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
+        "messages": _selection_messages(prompt),
         "temperature": 0.1,
     }
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     with urllib.request.urlopen(req) as resp:
         result = json.loads(resp.read().decode("utf-8"))
-    return result["choices"][0]["message"]["content"]
+    return str(result["choices"][0]["message"]["content"])
+
+
+def call_azure_openai(
+    prompt: str,
+    api_key: str,
+    endpoint: str,
+    deployment: str,
+    api_version: str,
+) -> str:
+    """Call Azure OpenAI chat completions and return the response text."""
+    import urllib.request
+
+    url = (
+        f"{endpoint.rstrip('/')}/openai/deployments/{deployment}"
+        f"/chat/completions?api-version={api_version}"
+    )
+    headers = {
+        "api-key": api_key,
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "messages": _selection_messages(prompt),
+        "temperature": 0.1,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    with urllib.request.urlopen(req) as resp:
+        result = json.loads(resp.read().decode("utf-8"))
+    return str(result["choices"][0]["message"]["content"])
+
+
+def select_with_model(prompt: str) -> str:
+    """Dispatch to Azure OpenAI when configured, else GitHub Models."""
+    api_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
+    endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
+    if api_key and endpoint:
+        deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
+        api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+        return call_azure_openai(prompt, api_key, endpoint, deployment, api_version)
+
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if token:
+        return call_github_models(prompt, token)
+
+    raise RuntimeError(
+        "No model credentials configured. Set AZURE_OPENAI_API_KEY and "
+        "AZURE_OPENAI_ENDPOINT, or GITHUB_TOKEN."
+    )
 
 
 def generate_runbook(case_names: List[str]) -> str:
@@ -1592,11 +1645,19 @@ def write_outputs(
 def main() -> None:
     diff = os.environ.get("PR_DIFF", "")
     changed_files = os.environ.get("PR_CHANGED_FILES", "")
-    token = os.environ.get("GITHUB_TOKEN", "")
     output_file = os.environ.get("RUNBOOK_OUTPUT", "ai_selected_cases.yml")
 
-    if not token:
-        print("ERROR: GITHUB_TOKEN is required for GitHub Models API", file=sys.stderr)
+    has_azure_openai = bool(
+        os.environ.get("AZURE_OPENAI_API_KEY")
+        and os.environ.get("AZURE_OPENAI_ENDPOINT")
+    )
+    has_github_models = bool(os.environ.get("GITHUB_TOKEN"))
+    if not has_azure_openai and not has_github_models:
+        print(
+            "ERROR: model credentials are required. Set AZURE_OPENAI_API_KEY "
+            "and AZURE_OPENAI_ENDPOINT, or GITHUB_TOKEN.",
+            file=sys.stderr,
+        )
         sys.exit(1)
     if not diff and not changed_files:
         print("ERROR: PR_DIFF or PR_CHANGED_FILES must be set", file=sys.stderr)
@@ -1712,9 +1773,9 @@ def main() -> None:
         tool_related_cases,
     )
 
-    print("Calling GitHub Models API for test case selection...")
+    print("Calling model API for test case selection...")
     try:
-        response = call_github_models(prompt, token)
+        response = select_with_model(prompt)
     except HTTPError as error:
         if error.code != 413:
             raise
@@ -1747,7 +1808,7 @@ def main() -> None:
             changed_tools,
             tool_related_cases[:MAX_PROMPT_FALLBACK_CASES],
         )
-        response = call_github_models(prompt, token)
+        response = select_with_model(prompt)
     print(f"AI response: {response}")
 
     selected_cases = parse_ai_response(response)

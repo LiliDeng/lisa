@@ -9,16 +9,22 @@ pool:
   vmImage: ubuntu-latest
 
 variables:
-  pythonVersion: '3.12'
+  - group: lisa_log_agent
+
+  - name: pythonVersion
+    value: '3.12'
 
   # Replace with your Azure DevOps Service Connection name
-  azureServiceConnection: 'lisa_connection'
+  - name: azureServiceConnection
+    value: 'lisa_connection'
 
   # Replace with your LISA runbook
-  runbook: 'lisa/microsoft/runbook/azure.yml'
+  - name: runbook
+    value: 'lisa/microsoft/runbook/ai_selected.yml'
 
   # Azure region
-  location: 'westus3'
+  - name: location
+    value: 'westus3'
 
 steps:
 
@@ -88,6 +94,11 @@ steps:
     python .github/scripts/ai_select_cases.py
 
   displayName: AI Select Test Cases
+  env:
+    AZURE_OPENAI_API_KEY: $(azure_openai_api_key)
+    AZURE_OPENAI_ENDPOINT: $(azure_openai_endpoint)
+    AZURE_OPENAI_DEPLOYMENT: gpt-4o
+    AZURE_OPENAI_API_VERSION: '2024-02-15-preview'
 
 - script: |
 
@@ -168,6 +179,7 @@ steps:
       -v "location:$(location)" \
       -v "marketplace_image:$(MARKETPLACE_IMAGE)" \
       -v "test_case_name:$CASE_PATTERN" \
+      -v "enable_tests:False" \
       -v "auth_type:token" \
       -v "s:azure_arm_access_token:$(ARM_TOKEN)"
 
