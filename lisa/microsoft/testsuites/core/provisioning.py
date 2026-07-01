@@ -52,6 +52,7 @@ from lisa.util.shell import wait_tcp_port_ready
     reboot.
     - Other provisioning tests verify if an environment can be provisioned with special
     hardware configurations.
+    - The smoke test also validates basic SSH connectivity after reboot.
     """,
 )
 class Provisioning(TestSuite):
