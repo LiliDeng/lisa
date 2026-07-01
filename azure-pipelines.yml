@@ -188,7 +188,7 @@ steps:
 
 - task: PublishTestResults@2
   displayName: Publish JUnit Results
-  condition: always()
+  condition: and(always(), ne(variables['CASE_COUNT'], '0'))
   inputs:
     testResultsFormat: JUnit
     testResultsFiles: '**/lisa.junit.xml'
@@ -197,7 +197,7 @@ steps:
 
 - task: PublishBuildArtifacts@1
   displayName: Publish Runtime Artifacts
-  condition: always()
+  condition: and(always(), ne(variables['CASE_COUNT'], '0'))
   inputs:
     PathtoPublish: runtime
     ArtifactName: lisa-runtime
