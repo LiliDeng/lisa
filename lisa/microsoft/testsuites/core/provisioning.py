@@ -57,6 +57,7 @@ from lisa.util.shell import wait_tcp_port_ready
 class Provisioning(TestSuite):
     TIME_OUT = 300
     PLATFORM_TIME_OUT = 600
+    # Comment-only change to validate AI selection skips comment edits.
 
     @TestCaseMetadata(
         description="""
