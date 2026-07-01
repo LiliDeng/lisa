@@ -1733,6 +1733,7 @@ def main() -> None:
     # method changes and narrows to specific case names for method-local edits.
     if has_testsuite_changes and testsuite_related_cases:
         validated = list(dict.fromkeys(testsuite_related_cases))
+        validated = filter_stress_tests(validated, changed_files)
         marketplace_image = select_marketplace_image(changed_files, diff)
         print(
             "Testsuite change detected. Using deterministic testsuite selection: "
