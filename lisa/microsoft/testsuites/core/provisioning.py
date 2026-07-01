@@ -293,6 +293,7 @@ class Provisioning(TestSuite):
     def verify_reboot_in_platform(
         self, log: Logger, node: RemoteNode, log_path: Path
     ) -> None:
+        log.debug("Starting reboot-in-platform smoke test.")
         self._smoke_test(
             log,
             node,
