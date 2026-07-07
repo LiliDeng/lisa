@@ -300,7 +300,7 @@ steps:
   inputs:
     # Name of the GitHub service connection created when the repo was
     # connected to Azure DevOps (OAuth-based, no PAT required).
-    gitHubConnection: 'github_lisa'
+    gitHubConnection: $(gitHubConnection)
     repositoryName: $(Build.Repository.Name)
     id: $(System.PullRequest.PullRequestNumber)
     comment: |
@@ -321,7 +321,7 @@ steps:
     and(always(), eq(variables['Build.Reason'], 'PullRequest'),
     eq(variables['CASE_COUNT'], '0'))
   inputs:
-    gitHubConnection: 'github_lisa'
+    gitHubConnection: $(gitHubConnection)
     repositoryName: $(Build.Repository.Name)
     id: $(System.PullRequest.PullRequestNumber)
     comment: |
