@@ -8,7 +8,7 @@ This script:
 1. Reads the PR diff (changed files + patch) from environment variables
    set by the GitHub Actions workflow.
 2. Enumerates all LISA test cases under microsoft/testsuites.
-3. Calls the GitHub Models API (GPT-4o) to decide which test cases
+3. Calls Azure OpenAI (GPT-4o) to decide which test cases
    are relevant to the code changes.
 4. Outputs a LISA runbook YAML fragment with the selected test cases.
 """
@@ -918,27 +918,6 @@ def _selection_messages(prompt: str) -> List[Dict[str, str]]:
     ]
 
 
-def call_github_models(prompt: str, token: str) -> str:
-    """Call GitHub Models API (OpenAI-compatible) and return the response text."""
-    import urllib.request
-
-    url = "https://models.github.ai/inference/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": "openai/gpt-4o",
-        "messages": _selection_messages(prompt),
-        "temperature": 0.1,
-    }
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-    with urllib.request.urlopen(req) as resp:
-        result = json.loads(resp.read().decode("utf-8"))
-    return str(result["choices"][0]["message"]["content"])
-
-
 def call_azure_openai(
     prompt: str,
     api_key: str,
@@ -969,7 +948,7 @@ def call_azure_openai(
 
 
 def select_with_model(prompt: str) -> str:
-    """Dispatch to Azure OpenAI when configured, else GitHub Models."""
+    """Dispatch to Azure OpenAI for model-based test selection."""
     api_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
     endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
     if api_key and endpoint:
@@ -977,13 +956,9 @@ def select_with_model(prompt: str) -> str:
         api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
         return call_azure_openai(prompt, api_key, endpoint, deployment, api_version)
 
-    token = os.environ.get("GITHUB_TOKEN", "")
-    if token:
-        return call_github_models(prompt, token)
-
     raise RuntimeError(
         "No model credentials configured. Set AZURE_OPENAI_API_KEY and "
-        "AZURE_OPENAI_ENDPOINT, or GITHUB_TOKEN."
+        "AZURE_OPENAI_ENDPOINT."
     )
 
 
@@ -1680,11 +1655,10 @@ def main() -> None:
         os.environ.get("AZURE_OPENAI_API_KEY")
         and os.environ.get("AZURE_OPENAI_ENDPOINT")
     )
-    has_github_models = bool(os.environ.get("GITHUB_TOKEN"))
-    if not has_azure_openai and not has_github_models:
+    if not has_azure_openai:
         print(
             "ERROR: model credentials are required. Set AZURE_OPENAI_API_KEY "
-            "and AZURE_OPENAI_ENDPOINT, or GITHUB_TOKEN.",
+            "and AZURE_OPENAI_ENDPOINT.",
             file=sys.stderr,
         )
         sys.exit(1)
