@@ -977,6 +977,11 @@ def generate_runbook(case_names: List[str], marketplace_image: str = "") -> str:
             "  - name: marketplace_image",
             f'    value: "{marketplace_image}"',
         ]
+    # Emit JUnit results so the pipeline can publish them.
+    lines += [
+        "notifier:",
+        "  - type: junit",
+    ]
     # One criteria per case so each is counted individually.
     lines.append("testcase:")
     for name in case_names:
