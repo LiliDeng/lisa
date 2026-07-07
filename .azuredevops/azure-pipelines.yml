@@ -292,6 +292,12 @@ steps:
     PathtoPublish: ai_selected_cases.yml
     ArtifactName: ai-selected-runbook
 
+- script: |
+    echo "gitHubConnection=[$(gitHubConnection)]"
+    echo "SERVICECONNECTION=[$(SERVICECONNECTION)]"
+  displayName: Debug connection variables
+  condition: always()
+
 - task: GitHubComment@0
   displayName: Comment on GitHub PR (cases selected)
   condition: >-
