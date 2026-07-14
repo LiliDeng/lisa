@@ -179,6 +179,7 @@ class CPU(TestSuite):
         log.debug(f"{thread_count} CPU threads detected...")
         # 2. Calculate vCPU count
         calculated_cpu_count = lscpu.calculate_vcpu_count()
+        log.debug(f"Calculated vCPU count: {calculated_cpu_count}")
         # 3. Judge whether the actual vCPU count equals to expected value.
         assert_that(thread_count).described_as(
             "The VM may end up being incorrectly configured on some Azure hosts,"
