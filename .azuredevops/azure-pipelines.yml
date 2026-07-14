@@ -45,6 +45,11 @@ steps:
     self_name = os.environ.get("SELF_NAME", "").strip()
     timeout_min = int(os.environ.get("TIMEOUT_MIN", "30"))
     poll_sec = int(os.environ.get("POLL_SEC", "20"))
+    # Authenticate GitHub API calls to avoid the 60 req/hour anonymous
+    # rate limit. Ignore an unexpanded ADO macro when the var is unset.
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if token.startswith("$("):
+        token = ""
 
     if not repo or not sha:
         print("No repo/sha available; skipping CI wait.")
@@ -61,6 +66,8 @@ steps:
         req = urllib.request.Request(api)
         req.add_header("Accept", "application/vnd.github+json")
         req.add_header("User-Agent", "ado-lisa-pipeline")
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
         with urllib.request.urlopen(req) as resp:
             return json.load(resp).get("check_runs", [])
 
@@ -113,6 +120,7 @@ steps:
     SELF_NAME: $(Build.DefinitionName)
     TIMEOUT_MIN: '30'
     POLL_SEC: '20'
+    GITHUB_TOKEN: $(GITHUB_TOKEN)
 
 - script: |
 
@@ -125,7 +133,7 @@ steps:
 
     git fetch origin "$TARGET"
 
-    BASE=$(git merge-base HEAD origin/$TARGET)
+    BASE=$(git merge-base HEAD "origin/$TARGET")
 
     echo "Merge base: $BASE"
 
@@ -174,29 +182,41 @@ steps:
 
     python <<'PY'
 
+    import re
     import yaml
+
+    def sanitize_vso(value):
+        # Strip characters that could inject ADO logging commands.
+        return value.replace("]", "").replace("\r", "").replace("\n", "")
 
     with open("ai_selected_cases.yml") as f:
         rb = yaml.safe_load(f)
 
-    cases = []
-
     image = ""
-
-    variables = rb.get("variable", [])
-
-    for v in variables:
+    for v in rb.get("variable", []):
         if v.get("name") == "marketplace_image":
             image = v.get("value", "")
 
+    cases = []
     for t in rb.get("testcase", []):
         c = t.get("criteria", {}).get("name")
         if c:
             cases.append(c)
 
-    print("Selected:", cases)
+    # The case names come from an LLM whose input (the PR diff) is
+    # untrusted. Reject anything that is not a plain test-case
+    # identifier before it flows into ##vso commands or the shell.
+    for name in cases:
+        if not re.fullmatch(r"[A-Za-z0-9_]+", name):
+            raise ValueError(f"Invalid test case name: {name!r}")
+    if image and not re.fullmatch(r"[A-Za-z0-9 ._-]+", image):
+        raise ValueError(f"Invalid marketplace image: {image!r}")
 
-    print(f"##vso[task.setvariable variable=CASE_NAMES]{','.join(cases)}")
+    case_names = sanitize_vso(",".join(cases))
+    image = sanitize_vso(image)
+
+    print("Selected:", cases)
+    print(f"##vso[task.setvariable variable=CASE_NAMES]{case_names}")
     print(f"##vso[task.setvariable variable=CASE_COUNT]{len(cases)}")
     print(f"##vso[task.setvariable variable=MARKETPLACE_IMAGE]{image}")
 
@@ -263,11 +283,15 @@ steps:
       -v "marketplace_image:$(MARKETPLACE_IMAGE)" \
       -v "test_case_name:$CASE_PATTERN" \
       -v "enable_tests:False" \
-      -v "auth_type:token" \
-      -v "s:azure_arm_access_token:$(ARM_TOKEN)"
+      -v "auth_type:token"
 
   displayName: Run Selected LISA Tests
   condition: ne(variables['CASE_COUNT'], '0')
+  env:
+    # Pass the ARM token as a secret env var (S_LISA_ prefix) instead of a
+    # -v command-line argument, so it is not exposed via /proc/*/cmdline.
+    # LISA loads S_LISA_<name> env vars as secret runbook variables.
+    S_LISA_azure_arm_access_token: $(ARM_TOKEN)
 
 - task: PublishTestResults@2
   displayName: Publish JUnit Results
