@@ -1,6 +1,6 @@
-FROM mcr.microsoft.com/azurelinux/base/python:3
+FROM mcr.microsoft.com/azurelinux/base/core:3.0
 
-ARG PYTHON_VERSION=3.14.7
+ARG PYTHON_VERSION=stable
 
 WORKDIR /app
 
@@ -23,31 +23,31 @@ RUN tdnf update -y && \
         ncurses-devel \
         openssl-devel \
         pkg-config \
-        python3-devel \
-        python3-pip \
-        python3-virtualenv \
         readline-devel \
         sqlite-devel \
         tar \
         wget \
+        xz \
         xz-devel \
         zlib-devel \
-        azure-cli \
         cairo-gobject-devel && \
     tdnf clean all && \
     rm -rf /var/cache/tdnf /tmp/*
 
-RUN wget "https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz" && \
-    tar -xzf "Python-${PYTHON_VERSION}.tgz" && \
-    cd "Python-${PYTHON_VERSION}" && \
-    ./configure --prefix=/usr/local --with-ensurepip=install && \
+RUN wget "https://aka.ms/lisa-python" -O "Python-${PYTHON_VERSION}.tar.xz" && \
+    tar -xJf "Python-${PYTHON_VERSION}.tar.xz" && \
+    PYTHON_SOURCE_DIR="$(find /app -maxdepth 1 -type d -name 'Python-*' -print -quit)" && \
+    test -n "${PYTHON_SOURCE_DIR}" && \
+    cd "${PYTHON_SOURCE_DIR}" && \
+    ./configure --prefix=/opt/python --enable-optimizations --with-ensurepip=install && \
     make -j "$(nproc)" && \
+    PYTHON_RELEASE_VERSION="$(./python -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')" && \
     make altinstall && \
-    ln -sf "/usr/local/bin/python${PYTHON_VERSION%.*}" /usr/local/bin/python3 && \
-    ln -sf "/usr/local/bin/pip${PYTHON_VERSION%.*}" /usr/local/bin/pip3 && \
-    python3 --version | grep -Fx "Python ${PYTHON_VERSION}" && \
+    ln -sf "/opt/python/bin/python${PYTHON_RELEASE_VERSION%.*}" /usr/local/bin/python3 && \
+    ln -sf "/opt/python/bin/pip${PYTHON_RELEASE_VERSION%.*}" /usr/local/bin/pip3 && \
+    python3 --version | grep -Fx "Python ${PYTHON_RELEASE_VERSION}" && \
     cd /app && \
-    rm -rf "Python-${PYTHON_VERSION}" "Python-${PYTHON_VERSION}.tgz"
+    rm -rf "${PYTHON_SOURCE_DIR}" "Python-${PYTHON_VERSION}.tar.xz"
 
 RUN wget https://aka.ms/downloadazcopy-v10-linux -O azcopy.tar.gz && \
     tar -xvf azcopy.tar.gz && \
@@ -56,9 +56,8 @@ RUN wget https://aka.ms/downloadazcopy-v10-linux -O azcopy.tar.gz && \
 
 ENV LISA_azcopy_path="/usr/local/bin/azcopy"
 
-RUN git clone --depth 1 --branch $(curl --silent "https://api.github.com/repos/microsoft/lisa/releases/latest" \
-    | grep '"tag_name":' \
-    | sed -E 's/.*"([^"]+)".*/\1/') https://github.com/microsoft/lisa.git /app/lisa
+RUN git clone --depth 1 --branch feature/docker-python-3.14.7 \
+    https://github.com/microsoft/lisa.git /app/lisa
 
 WORKDIR /app/lisa
 
