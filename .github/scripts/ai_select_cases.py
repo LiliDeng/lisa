@@ -39,15 +39,13 @@ RELEVANT_CHANGE_PATTERNS = [
     *FRAMEWORK_CHANGE_PATTERNS,
     *TESTSUITE_CHANGE_PATTERNS,
 ]
+
 NON_AZURE_PLATFORM_CHANGE_PATTERNS = (
     re.compile(r"^lisa/sut_orchestrator/(aws|baremetal|hyperv|libvirt|ready)/.+\.py$"),
     re.compile(
         r"^lisa/microsoft/testsuites/"
         r"(cloud_hypervisor|hyperv|kvm|libvirt|mshv|rust_vmm_mshv)/.+\.py$"
     ),
-)
-DEFAULT_MARKETPLACE_IMAGE = (
-    "canonical 0001-com-ubuntu-server-jammy 22_04-lts-gen2 latest"
 )
 MAX_PROMPT_DIFF_CHARS = 4000
 MAX_PROMPT_CANDIDATE_CASES = 120
@@ -101,41 +99,6 @@ LOGIC_TOKEN_STOP_WORDS = frozenset(
         "vm",
     }
 )
-
-MARKETPLACE_IMAGES: Dict[str, Dict[str, str]] = {
-    "ubuntu": {
-        "default": "canonical 0001-com-ubuntu-server-jammy 22_04-lts-gen2 latest",
-        "arm64": "canonical 0001-com-ubuntu-server-jammy 22_04-lts-arm64 latest",
-        "gen1": "canonical ubuntu-24_04-lts server-gen1 latest",
-        "gen2": "canonical 0001-com-ubuntu-server-jammy 22_04-lts-gen2 latest",
-    },
-    "debian": {
-        "default": "debian debian-12 12 latest",
-        "arm64": "debian debian-12 12-arm64 latest",
-        "gen2": "debian debian-12 12-gen2 latest",
-    },
-    "azurelinux": {
-        "default": "microsoftcblmariner azure-linux-3 azure-linux-3 latest",
-        "arm64": "microsoftcblmariner azure-linux-3 azure-linux-3-arm64 latest",
-        "gen2": "microsoftcblmariner azure-linux-3 azure-linux-3-gen2 latest",
-    },
-    "oracle": {
-        "default": "oracle oracle-linux ol94-lvm-gen2 latest",
-        "arm64": "oracle oracle-linux ol94-arm64-lvm-gen2 latest",
-        "gen2": "oracle oracle-linux ol94-lvm-gen2 latest",
-    },
-    "rhel": {
-        "default": "redhat rhel 9_5 latest",
-        "arm64": "redhat rhel-arm64 9_5-arm64 latest",
-        "gen2": "redhat rhel 95_gen2 latest",
-    },
-    "suse": {
-        "default": "suse sles-15-sp6 gen2 latest",
-        "arm64": "suse sles-15-sp6-arm64 gen2 latest",
-        "gen1": "suse sles-15-sp6 gen1 latest",
-        "gen2": "suse sles-15-sp6 gen2 latest",
-    },
-}
 
 
 def has_relevant_code_changes(changed_files: str) -> bool:
@@ -766,7 +729,10 @@ def _get_test_method_changes(
                 continue
 
             method_name = child.name
-            start_line = child.lineno
+            start_line = min(
+                (decorator.lineno for decorator in child.decorator_list),
+                default=child.lineno,
+            )
             end_line = getattr(child, "end_lineno", child.lineno)
 
             if any(start_line <= line_no <= end_line for line_no in changed_lines):
@@ -829,7 +795,8 @@ def get_testsuite_related_cases(
     if not exact_match_cases:
         return suite_match_cases
 
-    for changed_file_path in changed_testsuite_files:
+    modified_cases: List[str] = []
+    for changed_file_path in sorted(changed_testsuite_files):
         changed_lines = _changed_lines_for_file(
             repo_root,
             changed_file_path,
@@ -855,9 +822,71 @@ def get_testsuite_related_cases(
                 f"Detected specific test method changes in {changed_file_path}: "
                 f"{modified_test_cases}"
             )
-            return modified_test_cases
+            modified_cases.extend(modified_test_cases)
 
-    return exact_match_cases or suite_match_cases
+    return list(dict.fromkeys(modified_cases)) if modified_cases else exact_match_cases
+
+
+def _base_test_methods(root: Path, path: str) -> Set[Tuple[str, str]]:
+    for base_ref in _candidate_git_base_refs():
+        previous = subprocess.run(
+            ["git", "show", f"{base_ref}:{path}"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if previous.returncode != 0:
+            continue
+        try:
+            old_tree = ast.parse(previous.stdout)
+        except SyntaxError:
+            return set()
+        return {
+            (suite.name, method.name)
+            for suite in old_tree.body
+            if isinstance(suite, ast.ClassDef)
+            for method in suite.body
+            if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and any(
+                _decorator_name(decorator) == "TestCaseMetadata"
+                for decorator in method.decorator_list
+            )
+        }
+    return set()
+
+
+def get_added_test_cases(changed_files: str, diff: str) -> List[str]:
+    """Find new decorated test methods in changed suites using the PR patch."""
+    changed_lines = _extract_changed_new_lines(diff)
+    added: List[str] = []
+    root = find_repo_root()
+    for raw_path in changed_files.splitlines():
+        path = _normalize_repo_path(raw_path)
+        if not any(pattern.match(path) for pattern in TESTSUITE_CHANGE_PATTERNS):
+            continue
+        source_path = root / path
+        if not source_path.is_file():
+            continue
+        try:
+            tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        previous_methods = _base_test_methods(root, path)
+        for suite in tree.body:
+            if not isinstance(suite, ast.ClassDef):
+                continue
+            for method in suite.body:
+                if not isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                if (suite.name, method.name) in previous_methods:
+                    continue
+                if method.lineno in changed_lines.get(path, set()) and any(
+                    _decorator_name(decorator) == "TestCaseMetadata"
+                    for decorator in method.decorator_list
+                ):
+                    added.append(method.name)
+    return list(dict.fromkeys(added))
 
 
 def get_feature_related_cases(
@@ -1206,17 +1235,14 @@ def rank_logic_related_cases(
     for case_name in candidate_names:
         case_entry = case_map.get(case_name)
         if not case_entry:
+            scored_candidates.append((0, case_name))
             continue
         case_tokens = _tokenize_logic_text(_case_logic_text(case_entry))
         score = len(change_tokens.intersection(case_tokens))
         scored_candidates.append((score, case_name))
 
-    positive_cases = [case_name for score, case_name in scored_candidates if score > 0]
-    if positive_cases:
-        print(f"Keeping logic-related candidate cases: {positive_cases}")
-        return positive_cases
-
-    return candidate_names
+    scored_candidates.sort(key=lambda entry: entry[0], reverse=True)
+    return [case_name for _, case_name in scored_candidates]
 
 
 def select_candidate_cases(
@@ -1603,11 +1629,106 @@ def minimize_framework_only_cases(
     return selected
 
 
-def select_marketplace_image(changed_files: str, diff: str) -> str:
-    """Choose a minimal marketplace image based on code-change signals."""
-    combined = f"{changed_files}\n{diff}".lower()
+def _changed_distro(changed_files: str, diff: str) -> str:
+    path = "lisa/operating_system.py"
+    if path not in changed_files.splitlines():
+        return ""
+    source = find_repo_root() / path
+    try:
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return ""
+    changed_lines = _changed_lines_for_file(
+        find_repo_root(), path, _extract_changed_new_lines(diff)
+    )
+    classes = [
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.ClassDef)
+        and any(node.lineno <= line <= node.end_lineno for line in changed_lines)
+    ]
+    if len(classes) != 1:
+        return ""
+    return {
+        "suse": "suse",
+        "redhat": "rhel",
+        "cblmariner": "azurelinux",
+    }.get(classes[0].lower(), classes[0].lower())
 
-    distro = "ubuntu"
+
+def _discover_marketplace_image(distro: str, arch: str, generation: str) -> str:
+    from azure.identity import DefaultAzureCredential
+    from azure.mgmt.compute import ComputeManagementClient
+
+    subscription = os.environ.get("AZURE_SUBSCRIPTION_ID", "")
+    location = os.environ.get("AZURE_LOCATION", "")
+    if not subscription or not location:
+        raise ValueError(
+            "AZURE_SUBSCRIPTION_ID and AZURE_LOCATION are required to discover "
+            f"a {distro} Marketplace image"
+        )
+
+    publisher_names = {
+        "ubuntu": "canonical",
+        "azurelinux": "microsoftcblmariner",
+        "rhel": "redhat",
+    }
+    search_term = publisher_names.get(distro, distro)
+    credential = DefaultAzureCredential(exclude_interactive_browser_credential=True)
+    try:
+        with ComputeManagementClient(credential, subscription) as client:
+            images = client.virtual_machine_images
+            publishers = [
+                publisher.name
+                for publisher in images.list_publishers(location)
+                if publisher.name and search_term in publisher.name.lower()
+            ]
+            candidates: List[Tuple[int, str]] = []
+            for publisher in sorted(
+                publishers, key=lambda name: (name.lower() != search_term, name)
+            ):
+                for offer in images.list_offers(location, publisher):
+                    if not offer.name:
+                        continue
+                    for sku in images.list_skus(location, publisher, offer.name):
+                        name = sku.name or ""
+                        lower = name.lower()
+                        if not name or "preview" in lower:
+                            continue
+                        if arch == "arm64" and not re.search(r"arm64|aarch64", lower):
+                            continue
+                        if arch != "arm64" and re.search(r"arm64|aarch64", lower):
+                            continue
+                        if generation == "gen1" and "gen2" in lower:
+                            continue
+                        if generation == "gen2" and "gen1" in lower:
+                            continue
+                        versions = images.list(location, publisher, offer.name, name)
+                        if not versions:
+                            continue
+                        image = f"{publisher} {offer.name} {name} latest"
+                        score = (
+                            8 * (publisher.lower() == search_term)
+                            + 4 * (distro in offer.name.lower())
+                            + 2
+                            * (generation in lower if generation else "gen2" in lower)
+                            + ("lts" in lower)
+                        )
+                        candidates.append((score, image))
+            if candidates:
+                return sorted(candidates, key=lambda entry: (-entry[0], entry[1]))[0][1]
+    finally:
+        credential.close()
+
+    raise ValueError(f"No {distro} Marketplace image found in {location}")
+
+
+def select_marketplace_image(changed_files: str, diff: str) -> str:
+    """Resolve a distro-specific image in the target Azure region, if needed."""
+    combined = changed_files.lower()
+    changed_distro = _changed_distro(changed_files, diff)
+
+    distro = ""
     if re.search(r"suse|sles|opensuse", combined):
         distro = "suse"
     elif re.search(r"redhat|rhel", combined):
@@ -1628,12 +1749,10 @@ def select_marketplace_image(changed_files: str, diff: str) -> str:
     elif re.search(r"gen2|generation 2", combined):
         generation = "gen2"
 
-    images = MARKETPLACE_IMAGES[distro]
-    if arch in images:
-        return images[arch]
-    if generation and generation in images:
-        return images[generation]
-    return images.get("default", DEFAULT_MARKETPLACE_IMAGE)
+    distro = changed_distro or distro
+    if not distro:
+        return ""
+    return _discover_marketplace_image(distro, arch, generation)
 
 
 def write_outputs(
@@ -1661,7 +1780,8 @@ def write_outputs(
             f.write("## AI Test Case Selection\n\n")
             f.write(f"**Selected {len(validated)} test cases** ")
             f.write(f"from {len(all_cases)} available\n\n")
-            f.write(f"**Marketplace image:** `{marketplace_image}`\n\n")
+            image_label = marketplace_image or "LISA default"
+            f.write(f"**Marketplace image:** `{image_label}`\n\n")
             if validated:
                 f.write("| # | Test Case | Area |\n")
                 f.write("|---|-----------|------|\n")
@@ -1677,33 +1797,17 @@ def main() -> None:
     changed_files = os.environ.get("PR_CHANGED_FILES", "")
     output_file = os.environ.get("RUNBOOK_OUTPUT", "ai_selected_cases.yml")
 
-    has_azure_openai = bool(
-        os.environ.get("AZURE_OPENAI_API_KEY")
-        and os.environ.get("AZURE_OPENAI_ENDPOINT")
-    )
-    if not has_azure_openai:
+    if not diff and not changed_files:
         print(
-            "ERROR: model credentials are required. Set AZURE_OPENAI_API_KEY "
-            "and AZURE_OPENAI_ENDPOINT.",
+            "ERROR: PR_DIFF and PR_CHANGED_FILES are empty; cannot select "
+            "test cases without PR change data.",
             file=sys.stderr,
         )
         sys.exit(1)
-    if not diff and not changed_files:
-        print(
-            "No PR diff or changed files detected (empty diff). "
-            "Falling back to smoke_test."
-        )
-        write_outputs(
-            ["smoke_test"],
-            [],
-            select_marketplace_image(changed_files, diff),
-            output_file,
-        )
-        return
 
     if has_only_comment_changes(diff):
         print("Only comment changes detected. No test cases will be selected.")
-        write_outputs([], [], DEFAULT_MARKETPLACE_IMAGE, output_file)
+        write_outputs([], [], "", output_file)
         return
 
     if not has_relevant_code_changes(changed_files):
@@ -1761,6 +1865,7 @@ def main() -> None:
     testsuite_related_cases = get_testsuite_related_cases(
         all_cases, changed_files, diff
     )
+    added_test_cases = get_added_test_cases(changed_files, diff)
     feature_related_cases = get_feature_related_cases(all_cases, changed_features)
     tool_related_cases = get_tool_related_cases(all_cases, changed_tools)
     if testsuite_related_cases:
@@ -1775,9 +1880,10 @@ def main() -> None:
     # For testsuite changes, run only the cases mapped from modified tests.
     # get_testsuite_related_cases already expands to full suite for shared/common
     # method changes and narrows to specific case names for method-local edits.
-    if has_testsuite_changes and testsuite_related_cases:
+    if has_testsuite_changes and not has_framework_changes and testsuite_related_cases:
         validated = list(dict.fromkeys(testsuite_related_cases))
         validated = filter_stress_tests(validated, changed_files)
+        validated = list(dict.fromkeys([*added_test_cases, *validated]))
         validated = apply_smoke_fallback(validated, all_cases)
         marketplace_image = select_marketplace_image(changed_files, diff)
         print(
@@ -1826,6 +1932,17 @@ def main() -> None:
         changed_tools,
         tool_related_cases,
     )
+
+    if not (
+        os.environ.get("AZURE_OPENAI_API_KEY")
+        and os.environ.get("AZURE_OPENAI_ENDPOINT")
+    ):
+        print(
+            "ERROR: model credentials are required. Set AZURE_OPENAI_API_KEY "
+            "and AZURE_OPENAI_ENDPOINT.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     print("Calling model API for test case selection...")
     try:
@@ -1880,7 +1997,7 @@ def main() -> None:
     validated = align_with_testsuite_changes(
         validated,
         testsuite_related_cases,
-        has_testsuite_changes,
+        has_testsuite_changes and not has_framework_changes,
     )
     validated = align_with_feature_requirements(
         validated,
@@ -1912,6 +2029,7 @@ def main() -> None:
         has_framework_changes,
         has_testsuite_changes,
     )
+    validated = list(dict.fromkeys([*added_test_cases, *validated]))
     validated = apply_smoke_fallback(validated, all_cases)
     marketplace_image = select_marketplace_image(changed_files, diff)
     print(f"Selected {len(validated)} valid test cases: {validated}")
