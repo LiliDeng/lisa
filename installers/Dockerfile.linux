@@ -7,26 +7,25 @@ WORKDIR /app
 RUN tdnf update -y && \
     tdnf install -y \
         git \
-        gcc \
-        gobject-introspection-devel \
-        cairo-gobject \
-        cairo-devel \
-        pkg-config \
-        libvirt-devel \
-        build-essential \
-        cairo-gobject-devel \
-        curl \
         wget \
         tar \
-        azure-cli \
+        gcc \
         gcc-c++ \
         make \
         binutils \
         glibc-devel \
-        kernel-headers \
-        ca-certificates && \
-    tdnf clean all && \
-    rm -rf /var/cache/tdnf /tmp/*
+        ca-certificates \
+        openssl-devel \
+        sqlite-devel \
+        zlib-devel \
+        xz-devel \
+        bzip2-devel \
+        libffi-devel \
+        readline-devel \
+        libvirt-devel \
+        azure-cli && \
+        tdnf clean all && \
+        rm -rf /var/cache/tdnf /tmp/*
 
 RUN wget "https://aka.ms/lisa-python" -O "Python-${PYTHON_VERSION}.tar.xz" && \
     tar -xJf "Python-${PYTHON_VERSION}.tar.xz" && \
