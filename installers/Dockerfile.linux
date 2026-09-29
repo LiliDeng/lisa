@@ -13,16 +13,12 @@ RUN tdnf update -y && \
         cairo-devel \
         pkg-config \
         libvirt-devel \
-        python3-devel \
-        python3-pip \
-        python3-virtualenv \
         build-essential \
         cairo-gobject-devel \
         curl \
         wget \
         tar \
         azure-cli \
-        gcc \
         gcc-c++ \
         make \
         binutils \
