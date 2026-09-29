@@ -19,11 +19,14 @@ RUN tdnf update -y && \
         sqlite-devel \
         zlib-devel \
         xz-devel \
+        gawk \
         bzip2-devel \
         libffi-devel \
         readline-devel \
         libvirt-devel \
-        azure-cli && \
+        curl \
+        azure-cli \
+        kernel-headers && \
         tdnf clean all && \
         rm -rf /var/cache/tdnf /tmp/*
 
@@ -51,8 +54,9 @@ RUN wget https://aka.ms/downloadazcopy-v10-linux -O azcopy.tar.gz && \
 
 ENV LISA_azcopy_path="/usr/local/bin/azcopy"
 
-RUN git clone --depth 1 --branch feature/docker-python-3.14.7 \
-    https://github.com/microsoft/lisa.git /app/lisa
+RUN git clone --depth 1 --branch $(curl --silent "https://api.github.com/repos/microsoft/lisa/releases/latest" \
+    | grep '"tag_name":' \
+    | sed -E 's/.*"([^"]+)".*/\1/') https://github.com/microsoft/lisa.git /app/lisa
 
 WORKDIR /app/lisa
 
