@@ -49,6 +49,8 @@ RUN wget "https://aka.ms/lisa-python" -O "Python-${PYTHON_VERSION}.tar.xz" && \
     cd /app && \
     rm -rf "${PYTHON_SOURCE_DIR}" "Python-${PYTHON_VERSION}.tar.xz"
 
+ENV PATH="/opt/python/bin:${PATH}"
+
 RUN wget https://aka.ms/downloadazcopy-v10-linux -O azcopy.tar.gz && \
     tar -xvf azcopy.tar.gz && \
     mv azcopy*/azcopy /usr/local/bin/ && \
