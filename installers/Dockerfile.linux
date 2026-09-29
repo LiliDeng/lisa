@@ -6,31 +6,29 @@ WORKDIR /app
 
 RUN tdnf update -y && \
     tdnf install -y \
-        bzip2-devel \
-        build-essential \
-        ca-certificates \
-        curl \
         git \
         gcc \
-        gdbm-devel \
         gobject-introspection-devel \
         cairo-gobject \
         cairo-devel \
-        libffi-devel \
-        libuuid-devel \
-        libvirt-devel \
-        make \
-        ncurses-devel \
-        openssl-devel \
         pkg-config \
-        readline-devel \
-        sqlite-devel \
-        tar \
+        libvirt-devel \
+        python3-devel \
+        python3-pip \
+        python3-virtualenv \
+        build-essential \
+        cairo-gobject-devel \
+        curl \
         wget \
-        xz \
-        xz-devel \
-        zlib-devel \
-        cairo-gobject-devel && \
+        tar \
+        azure-cli \
+        gcc \
+        gcc-c++ \
+        make \
+        binutils \
+        glibc-devel \
+        kernel-headers \
+        ca-certificates && \
     tdnf clean all && \
     rm -rf /var/cache/tdnf /tmp/*
 
