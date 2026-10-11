@@ -1,6 +1,9 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT license.
 
+# NOTE: trivial no-op edit to exercise AI test selection with a clean,
+# lint-passing change (CI-pass verification PR; safe to revert).
+
 import re
 from pathlib import Path
 from statistics import mean, median
