@@ -75,7 +75,10 @@ OS and platform, not every hardware or runtime prerequisite. Both stable and
 preview cases can be selected so directly changed preview tests are not silently
 excluded.
 
-Each group has a fresh runtime log directory. Every planned case must have
+Each group has a fresh runtime log directory, passed to LISA as an absolute
+``--log_path`` so execution and JUnit verification use the same directory.
+Relative log paths would be prefixed with LISA's own runtime directory.
+Every planned case must have
 successful JUnit results: missing results, SKIPPED, ATTEMPTED, EXPUNGED, and failed
 cases make validation incomplete or failed. Other groups still run after a
 group fails. The ``pr_validation_results.json`` artifact records resolved image
