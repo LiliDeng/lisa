@@ -2885,11 +2885,11 @@ class Suse(Linux):
             )
 
     def _update_packages(self, packages: Optional[List[str]] = None) -> None:
-        command = "zypper --non-interactive --gpg-auto-import-keys update "
+        update_command = "zypper --non-interactive --gpg-auto-import-keys update "
         if packages:
-            command += " ".join(packages)
+            update_command += " ".join(packages)
         self._execute_zypper_with_lock_retry(
-            command, operation_name="update", sudo=True, timeout=3600
+            update_command, operation_name="update", sudo=True, timeout=3600
         )
 
     def _package_exists(self, package: str) -> bool:
