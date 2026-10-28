@@ -41,6 +41,25 @@ Selection rules
   model responses with no covered obligations, and model API failures are not
   replaced with a successful-looking smoke run.
 
+Model configuration
+-------------------
+
+Selection uses the Azure OpenAI v1 Responses API. Pipeline variables continue
+to supply the API key, endpoint, and deployment name:
+
+* ``azure_openai_api_key``: the existing secret API key.
+* ``azure_openai_endpoint``: either the HTTPS resource root or its
+  ``/openai/v1`` base URL, optionally with a trailing slash.
+* ``azure_openai_deployment``: the actual Azure deployment name, for example
+  ``gpt-5.4`` when a deployment with that name exists.
+
+No ``azure_openai_api_version`` variable is needed. The request posts to
+``/openai/v1/responses`` with the deployment in the ``model`` field. Authentication
+remains API-key based; no Entra ID or service-connection change is required.
+Reasoning-only, refused, incomplete, and empty responses are explicit errors,
+not empty successful selections. The client does not send a ``temperature``
+parameter, so deployments that do not support it can be used.
+
 Execution and results
 ---------------------
 

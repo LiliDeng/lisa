@@ -23,6 +23,7 @@ from itertools import chain
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple
 from urllib.error import HTTPError
+from urllib.parse import urlsplit
 
 FRAMEWORK_CHANGE_PATTERNS = (
     re.compile(r"^lisa/advanced_tools/.+\.py$"),
@@ -996,28 +997,73 @@ def call_azure_openai(
     api_key: str,
     endpoint: str,
     deployment: str,
-    api_version: str,
 ) -> str:
-    """Call Azure OpenAI chat completions and return the response text."""
+    """Call the Azure OpenAI v1 Responses API using the configured API key."""
     import urllib.request
 
-    url = (
-        f"{endpoint.rstrip('/')}/openai/deployments/{deployment}"
-        f"/chat/completions?api-version={api_version}"
-    )
+    endpoint = endpoint.strip().rstrip("/")
+    parsed = urlsplit(endpoint)
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in ("", "/openai/v1")
+    ):
+        raise ValueError(
+            "AZURE_OPENAI_ENDPOINT must be an HTTPS resource root or /openai/v1 URL."
+        )
+    base_url = endpoint if parsed.path else f"{endpoint}/openai/v1"
+    url = f"{base_url}/responses"
     headers = {
         "api-key": api_key,
         "Content-Type": "application/json",
     }
     payload = {
-        "messages": _selection_messages(prompt),
-        "temperature": 0.1,
+        "model": deployment,
+        "input": _selection_messages(prompt),
+        "store": False,
     }
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req, timeout=180) as resp:
         result = json.loads(resp.read().decode("utf-8"))
-    return str(result["choices"][0]["message"]["content"])
+    return responses_output_text(result)
+
+
+def responses_output_text(result: object) -> str:
+    if not isinstance(result, dict):
+        raise ValueError("Responses API returned a non-object response.")
+    if result.get("status") != "completed" or result.get("error"):
+        raise RuntimeError(
+            f"Responses API failed to complete (status={result.get('status')})."
+        )
+    output = result.get("output")
+    if not isinstance(output, list):
+        raise ValueError("Responses API returned no output array.")
+    texts: List[str] = []
+    for item in output:
+        if not isinstance(item, dict):
+            raise ValueError("Responses API returned an invalid output item.")
+        if item.get("type") != "message":
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            raise ValueError("Responses API returned invalid message content.")
+        for part in content:
+            if not isinstance(part, dict):
+                raise ValueError("Responses API returned an invalid content item.")
+            if part.get("type") == "refusal":
+                raise RuntimeError("Responses API refused case selection.")
+            if part.get("type") == "output_text":
+                text = part.get("text")
+                if not isinstance(text, str):
+                    raise ValueError("Responses API output_text is not a string.")
+                texts.append(text)
+    text = "".join(texts)
+    if not text.strip():
+        raise ValueError("Responses API returned no text for case selection.")
+    return text
 
 
 def select_with_model(prompt: str) -> str:
@@ -1026,8 +1072,7 @@ def select_with_model(prompt: str) -> str:
     endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
     if api_key and endpoint:
         deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
-        api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
-        return call_azure_openai(prompt, api_key, endpoint, deployment, api_version)
+        return call_azure_openai(prompt, api_key, endpoint, deployment)
 
     raise RuntimeError(
         "No model credentials configured. Set AZURE_OPENAI_API_KEY and "
