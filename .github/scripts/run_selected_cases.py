@@ -43,7 +43,10 @@ def resolve_image(image: str, location: str) -> str:
 def verify_results(directory: Path, expected: List[str]) -> None:
     files = list(directory.rglob("lisa.junit.xml"))
     if not files:
-        raise ValueError("No JUnit results produced; validation did not execute.")
+        raise ValueError(
+            f"No JUnit results found under {directory}; "
+            "execution coverage cannot be verified."
+        )
     cases = [
         case for path in files for case in ElementTree.parse(path).iter("testcase")
     ]
@@ -110,7 +113,8 @@ def run_plan(plan_path: Path, runbook: str, location: str) -> None:
     results: List[Dict[str, str]] = []
     report_path = plan_path.with_name("pr_validation_results.json")
     for index, (group, image) in enumerate(zip(groups, images)):
-        directory = Path("runtime") / "pr-validation" / f"group-{index}"
+        # LISA resolves relative log paths under its own runtime root.
+        directory = (Path("runtime") / "pr-validation" / f"group-{index}").resolve()
         if directory.exists():
             raise ValueError(f"Refusing to reuse stale results directory: {directory}")
         directory.mkdir(parents=True)
