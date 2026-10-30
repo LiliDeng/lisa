@@ -1303,7 +1303,8 @@ class AzureImageStandard(TestSuite):
     def verify_cloud_init_error_status(self, node: Node) -> None:
         cat = node.tools[Cat]
         if isinstance(node.os, CBLMariner):
-            if node.os.information.version < "2.0.0":
+            minimum_supported_version = "2.0.0"
+            if node.os.information.version < minimum_supported_version:
                 raise SkippedException(
                     "CBLMariner 1.0 is now obsolete so skip the test."
                 )
