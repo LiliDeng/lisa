@@ -174,7 +174,7 @@ class CPU(TestSuite):
     )
     def verify_cpu_count(self, node: Node, log: Logger) -> None:
         lscpu = node.tools[Lscpu]
-        # 1. Get vCPU count.
+        # 1. Read the observed vCPU count.
         thread_count = lscpu.get_thread_count()
         log.debug(f"{thread_count} CPU threads detected...")
         # 2. Calculate vCPU count
