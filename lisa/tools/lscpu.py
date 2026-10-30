@@ -156,9 +156,9 @@ class Lscpu(Tool):
         """
         core_per_socket = self.get_core_per_socket_count(force_run=force_run)
         socket_count = self.get_socket_count(force_run=force_run)
-        physical_core_count = core_per_socket * socket_count
+        calculated_physical_cores = core_per_socket * socket_count
 
-        return physical_core_count
+        return calculated_physical_cores
 
     def get_architecture(self, force_run: bool = False) -> CpuArchitecture:
         architecture: str = ""
