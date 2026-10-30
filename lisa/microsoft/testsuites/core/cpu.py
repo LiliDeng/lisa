@@ -335,15 +335,15 @@ class CPU(TestSuite):
         # by the hypervisor, so lscpu reports "-" for all cache values.
         # If all CPUs lack cache info, skip the test. If only some do, treat it
         # as a real failure so a partial/mixed state isn't silently masked.
-        unknown_l3_cache_count = sum(
+        unknown_cache_count = sum(
             1 for cpu in cpu_info if cpu.l3_cache == UNKNOWN_CACHE_ID
         )
-        if unknown_l3_cache_count == len(cpu_info):
+        if unknown_cache_count == len(cpu_info):
             raise SkippedException(skip_message)
-        if unknown_l3_cache_count:
+        if unknown_cache_count:
             raise LisaException(
                 "Inconsistent L3 cache topology reported by lscpu: "
-                f"{unknown_l3_cache_count} of {len(cpu_info)} CPUs have unknown "
+                f"{unknown_cache_count} of {len(cpu_info)} CPUs have unknown "
                 "L3 cache IDs while others have valid values. Investigate lscpu "
                 "parsing or host cache-topology exposure on this VM."
             )
