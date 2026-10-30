@@ -12,7 +12,7 @@ pool:
 parameters:
   - name: validationImages
     type: string
-    default: '[]'
+    default: '["microsoftcblmariner azure-linux-3 azure-linux-3-gen2 latest"]'
     displayName: 'Explicit reviewed Marketplace images (JSON array, optional)'
 
 variables:
