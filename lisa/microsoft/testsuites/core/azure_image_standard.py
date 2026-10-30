@@ -1286,7 +1286,7 @@ class AzureImageStandard(TestSuite):
 
     @TestCaseMetadata(
         description="""
-        This test will check ERROR, WARNING messages from /var/log/cloud-init.log
+        This test checks ERROR, WARNING messages from /var/log/cloud-init.log
         and also check cloud-init exit status.
 
         Steps:
@@ -1673,7 +1673,10 @@ class AzureImageStandard(TestSuite):
         3. Fail the test if the architecture is not 64-bit.
         """,
         priority=1,
-        requirement=simple_requirement(supported_platform_type=[AZURE, QEMU]),
+        requirement=simple_requirement(
+            supported_platform_type=[AZURE, QEMU],
+            supported_os=[Ubuntu],
+        ),
     )
     def verify_azure_64bit_os(self, node: Node) -> None:
         uname_tool = node.tools[Uname]
