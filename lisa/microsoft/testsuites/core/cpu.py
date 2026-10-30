@@ -175,12 +175,12 @@ class CPU(TestSuite):
     def verify_cpu_count(self, node: Node, log: Logger) -> None:
         lscpu = node.tools[Lscpu]
         # 1. Get vCPU count.
-        thread_count = lscpu.get_thread_count()
-        log.debug(f"{thread_count} CPU threads detected...")
+        observed_threads = lscpu.get_thread_count()
+        log.debug(f"{observed_threads} CPU threads detected...")
         # 2. Calculate vCPU count
         calculated_cpu_count = lscpu.calculate_vcpu_count()
         # 3. Judge whether the actual vCPU count equals to expected value.
-        assert_that(thread_count).described_as(
+        assert_that(observed_threads).described_as(
             "The VM may end up being incorrectly configured on some Azure hosts,"
             " it is a known host bug, please check the host version."
         ).is_equal_to(calculated_cpu_count)
