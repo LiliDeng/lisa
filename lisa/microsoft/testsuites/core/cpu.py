@@ -162,7 +162,7 @@ class CPU(TestSuite):
 
     @TestCaseMetadata(
         description="""
-            This test will check that vCPU count correctness.
+            This test verifies that the observed vCPU count matches the topology.
             Steps :
             1. Get vCPU count.
             2. Calculate vCPU count by core_per_socket_count * socket_count *
