@@ -5,6 +5,8 @@ The Azure DevOps PR pipeline uses ``.github/scripts/ai_select_cases.py`` to
 produce ``ai_selection/ai_selected_cases.json``. This plan, rather than the
 legacy YAML selection fragment, is the authoritative input to execution.
 
+An empty execution plan does not constitute a passing guest test result.
+
 Selection rules
 ---------------
 
