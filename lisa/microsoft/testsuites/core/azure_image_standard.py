@@ -1665,7 +1665,7 @@ class AzureImageStandard(TestSuite):
 
     @TestCaseMetadata(
         description="""
-        This test verifies that the Linux operating system has a 64-bit architecture.
+        This test checks that the guest operating system uses a 64-bit architecture.
 
         Steps:
         1. Retrieve the OS architecture using the Uname tool.
