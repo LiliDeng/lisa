@@ -398,8 +398,6 @@ jobs:
           <!-- ai-test-selection -->
           ## AI Test Case Selection
 
-          <!-- ai-test-selection-run:$(Build.BuildId):$(System.JobAttempt) -->
-
           | Item | Result |
           |---|---|
           | Selection status | `$(SELECTION_STATUS)` |
@@ -416,15 +414,3 @@ jobs:
           $(MANUAL_RECOMMENDATIONS)
 
           [View full logs in Azure DevOps]($(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId))
-
-    - task: CleanupGitHubComments@0
-      displayName: Clean older automatic PR reports
-      condition: >-
-        and(always(), eq(variables['Build.Reason'], 'PullRequest'),
-        ne(variables['CASE_COUNT'], ''))
-      inputs:
-        gitHubConnection: $(gitHubConnection)
-        repositoryName: $(Build.Repository.Name)
-        id: $(System.PullRequest.PullRequestNumber)
-        buildId: $(Build.BuildId)
-        jobAttempt: $(System.JobAttempt)
