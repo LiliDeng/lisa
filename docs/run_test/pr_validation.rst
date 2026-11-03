@@ -60,6 +60,12 @@ Selection rules
   including its platform, execution status, prerequisites, and selection reason.
   The same recommendation table appears in the pipeline summary and the
   selector's GitHub step summary. Empty images are shown as ``Not applicable``.
+  The PR overview reports ``Test execution result``, not the overall pipeline
+  job status. With no executable cases, this is ``Skipped`` even when the job
+  successfully publishes recommendations. For executed plans, it reflects raw
+  head outcomes: ``Passed``, ``Failed``, ``Skipped``, or ``Incomplete``.
+  Missing execution reports remain ``Not completed``. A matching baseline
+  failure does not turn a failed head test into ``Passed``.
 
 Model configuration
 -------------------

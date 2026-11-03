@@ -255,6 +255,8 @@ jobs:
         print(f"##vso[task.setvariable variable=MARKETPLACE_IMAGE]{image or 'Not applicable'}")
         print(f"##vso[task.setvariable variable=SELECTION_STATUS]{plan['status']}")
         print(f"##vso[task.setvariable variable=RECOMMENDED_CASE_COUNT]{len(recommendations)}")
+        execution_result = "Skipped" if not cases else "Not completed"
+        print(f"##vso[task.setvariable variable=TEST_EXECUTION_RESULT]{execution_result}")
         manual_summary = recommendation_table(recommendations)
         encoded_summary = (
             manual_summary.replace("%", "%AZP25")
@@ -305,6 +307,24 @@ jobs:
         results = json.loads(path.read_text())
         if not results or any(r["status"] == "running" for r in results):
             raise RuntimeError("Validation comparison report is incomplete.")
+        head_statuses = {
+            case["head"]["status"]
+            for group in results for case in group["cases"].values()
+        }
+        unknown = head_statuses - {
+            "passed", "failed", "error", "skipped", "missing", "inconsistent"
+        }
+        if unknown:
+            raise ValueError(f"Unknown head test statuses: {sorted(unknown)}")
+        if head_statuses == {"passed"}:
+            execution_result = "Passed"
+        elif head_statuses.intersection({"failed", "error"}):
+            execution_result = "Failed"
+        elif head_statuses == {"skipped"}:
+            execution_result = "Skipped"
+        else:
+            execution_result = "Incomplete"
+        print(f"##vso[task.setvariable variable=TEST_EXECUTION_RESULT]{execution_result}")
         counts = {}
         for group in results:
             print(group["image"], group["status"], group["details"])
@@ -384,7 +404,7 @@ jobs:
           | Selected for Azure execution | $(CASE_COUNT) |
           | Recommended, not executed | $(RECOMMENDED_CASE_COUNT) |
           | Marketplace image | $(MARKETPLACE_IMAGE) |
-          | Pipeline result (not a test verdict) | $(Agent.JobStatus) |
+          | Test execution result | $(TEST_EXECUTION_RESULT) |
           | Baseline comparison | $(REGRESSION_SUMMARY) |
 
           **Selected cases:** $(CASE_NAMES)
