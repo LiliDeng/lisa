@@ -11,6 +11,15 @@ Selection rules
 * Changed test methods, including metadata edits, are required. Shared helper
   edits conservatively include cases from the affected file or testsuite area.
   Changes in multiple files are accumulated.
+* Removing complete decorated test methods without changing remaining code
+  produces ``not_required`` with no model call or guest execution. Complete
+  test-only suite/file removals are also skipped; deleted helper or other
+  executable code is not treated as case-only removal. The selector checks the
+  original Git blob from the full PR diff against the current AST. Renames still
+  require the new case name. Mixed changes retain coverage for remaining case,
+  helper, tool, or framework edits, without selecting a case merely because it
+  follows a removed method. References to removed test methods retain
+  conservative suite coverage rather than being classified as safe deletion.
 * Framework feature and tool changes require at least one matching test for
   every detected feature/tool. AI ranks related candidates; it cannot remove
   these obligations. Priority and naming conventions are not evidence that a

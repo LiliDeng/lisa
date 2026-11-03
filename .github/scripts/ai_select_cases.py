@@ -21,7 +21,7 @@ import subprocess
 import sys
 from itertools import chain
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 
@@ -390,6 +390,184 @@ def _decorator_name(node: ast.AST) -> str:
     return ""
 
 
+def _test_case_methods(
+    tree: ast.Module,
+) -> Dict[Tuple[str, str], Union[ast.FunctionDef, ast.AsyncFunctionDef]]:
+    methods: Dict[Tuple[str, str], Union[ast.FunctionDef, ast.AsyncFunctionDef]] = {}
+    for suite in tree.body:
+        if not isinstance(suite, ast.ClassDef):
+            continue
+        for child in suite.body:
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
+                _decorator_name(item) == "TestCaseMetadata"
+                for item in child.decorator_list
+            ):
+                key = (suite.name, child.name)
+                if key in methods:
+                    raise ValueError(f"Ambiguous test case definition: {key}")
+                methods[key] = child
+    return methods
+
+
+def _without_removed_test_cases(
+    repo_root: Path, path: str, diff: str
+) -> Tuple[str, bool, Optional[Tuple[List[str], bool]]]:
+    original_blob = re.search(r"(?m)^index ([0-9a-f]+)\.\.[0-9a-f]+", diff)
+    if not original_blob or not original_blob.group(1).strip("0"):
+        print(f"No original testsuite blob for {path}; retaining coverage.")
+        return diff, False, None
+
+    original = subprocess.run(
+        ["git", "cat-file", "blob", original_blob.group(1)],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if original.returncode:
+        raise ValueError(f"Cannot read original {path}: {original.stderr.strip()}")
+    source_path = repo_root / path
+    current_source = (
+        source_path.read_text(encoding="utf-8") if source_path.is_file() else ""
+    )
+    before = ast.parse(original.stdout, filename=f"{path} (before)")
+    after = ast.parse(current_source, filename=path)
+    old_methods = _test_case_methods(before)
+    new_methods = _test_case_methods(after)
+    remaining_methods = {
+        (suite.name, child.name)
+        for suite in after.body
+        if isinstance(suite, ast.ClassDef)
+        for child in suite.body
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    shared_removed = any(
+        (suite.name, child.name) not in remaining_methods
+        for suite in before.body
+        if isinstance(suite, ast.ClassDef)
+        for child in suite.body
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and (suite.name, child.name) not in old_methods
+    )
+    removed_keys = old_methods.keys() - new_methods.keys()
+    if not removed_keys:
+        return diff, False, ([], True) if shared_removed else None
+
+    remaining_classes = {
+        node.name for node in after.body if isinstance(node, ast.ClassDef)
+    }
+    removed_suites = {suite for suite, _ in removed_keys} - remaining_classes
+    removed_names = {name for _, name in removed_keys} | removed_suites
+    if any(
+        (isinstance(node, ast.Attribute) and node.attr in removed_names)
+        or (isinstance(node, ast.Name) and node.id in removed_names)
+        or (
+            isinstance(node, ast.Call)
+            and _decorator_name(node.func) in ("getattr", "hasattr")
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+            and node.args[1].value in removed_names
+        )
+        for node in ast.walk(after)
+    ):
+        return diff, False, ([], True)
+
+    removed = [old_methods[key] for key in removed_keys]
+    for suite in list(before.body):
+        if not isinstance(suite, ast.ClassDef):
+            continue
+        suite.body = [node for node in suite.body if node not in removed]
+        if (
+            suite.name not in remaining_classes
+            and suite.name in removed_suites
+            and any(
+                _decorator_name(item) == "TestSuiteMetadata"
+                for item in suite.decorator_list
+            )
+            and all(
+                isinstance(node, ast.Pass)
+                or (
+                    isinstance(node, ast.Expr)
+                    and isinstance(node.value, ast.Constant)
+                    and isinstance(node.value.value, str)
+                )
+                for node in suite.body
+            )
+        ):
+            before.body.remove(suite)
+
+    for tree in (before, after):
+        for suite in tree.body:
+            if isinstance(suite, ast.ClassDef):
+                suite.body = [
+                    node for node in suite.body if not isinstance(node, ast.Pass)
+                ]
+    if ast.dump(before) == ast.dump(after) or (
+        not after.body
+        and all(
+            isinstance(node, (ast.Import, ast.ImportFrom, ast.Pass))
+            or (
+                isinstance(node, ast.Expr)
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
+            )
+            for node in before.body
+        )
+    ):
+        return "", True, None
+
+    # Text diff anchors can land in an unchanged neighbor after a method deletion.
+    changed_methods = [
+        method.name
+        for key, method in new_methods.items()
+        if key not in old_methods or ast.dump(old_methods[key]) != ast.dump(method)
+    ]
+    for tree, methods in ((before, old_methods), (after, new_methods)):
+        for suite in tree.body:
+            if isinstance(suite, ast.ClassDef):
+                suite.body = [
+                    node for node in suite.body if node not in methods.values()
+                ]
+    return diff, False, (changed_methods, ast.dump(before) != ast.dump(after))
+
+
+def filter_removed_test_cases(
+    repo_root: Path, changed_files: str, diff: str
+) -> Tuple[str, str, Dict[str, Tuple[List[str], bool]]]:
+    changed = {_normalize_repo_path(path) for path in changed_files.splitlines()}
+    removed_files: Set[str] = set()
+    method_changes: Dict[str, Tuple[List[str], bool]] = {}
+    remaining_diff: List[str] = []
+    for block in re.split(r"(?m)(?=^diff --git )", diff):
+        path_match = re.search(r"(?m)^\+\+\+ b/(.+)$", block) or re.search(
+            r"(?m)^--- a/(.+)$", block
+        )
+        path = _normalize_repo_path(path_match.group(1)) if path_match else ""
+        if path in changed and any(
+            pattern.match(path) for pattern in TESTSUITE_CHANGE_PATTERNS
+        ):
+            block, only_removed_cases, changes = _without_removed_test_cases(
+                repo_root, path, block
+            )
+            if only_removed_cases:
+                print(f"Only complete test cases were removed from {path}.")
+                removed_files.add(path)
+            if changes is not None:
+                method_changes[path] = changes
+        remaining_diff.append(block)
+    return (
+        "\n".join(
+            path
+            for path in changed_files.splitlines()
+            if _normalize_repo_path(path) not in removed_files
+        ),
+        "".join(remaining_diff),
+        method_changes,
+    )
+
+
 def _extract_tool_imports(tree: ast.AST) -> Dict[str, str]:
     tool_aliases: Dict[str, str] = {}
 
@@ -756,6 +934,7 @@ def get_testsuite_related_cases(
     all_cases: List[Tuple[str, str, str, int, Tuple[str, ...], Tuple[str, ...]]],
     changed_files: str,
     diff: str = "",
+    method_changes: Optional[Dict[str, Tuple[List[str], bool]]] = None,
 ) -> List[str]:
     """
     Return test cases related to changed testsuite files.
@@ -807,20 +986,22 @@ def get_testsuite_related_cases(
             for path, _, name, _, _, _ in all_cases
             if path.replace("\\", "/") == changed_file_path
         ]
-        changed_lines = _changed_lines_for_file(
-            repo_root,
-            changed_file_path,
-            changed_lines_by_file,
-        )
-        if not changed_lines:
-            related_cases.extend(file_cases or suite_match_cases)
-            continue
-
-        modified_test_cases, shared_changed = _get_test_method_changes(
-            repo_root,
-            changed_file_path,
-            changed_lines,
-        )
+        if method_changes and changed_file_path in method_changes:
+            modified_test_cases, shared_changed = method_changes[changed_file_path]
+        else:
+            changed_lines = _changed_lines_for_file(
+                repo_root,
+                changed_file_path,
+                changed_lines_by_file,
+            )
+            if not changed_lines:
+                related_cases.extend(file_cases or suite_match_cases)
+                continue
+            modified_test_cases, shared_changed = _get_test_method_changes(
+                repo_root,
+                changed_file_path,
+                changed_lines,
+            )
         if shared_changed:
             print(
                 f"Detected shared/common method changes in {changed_file_path}. "
@@ -1880,14 +2061,16 @@ def main() -> None:
         write_outputs([], [], DEFAULT_MARKETPLACE_IMAGE, output_file)
         return
 
-    if not has_relevant_code_changes(changed_files):
-        print("No guest-code changes. Guest validation is not required.")
+    repo_root = find_repo_root()
+    changed_files, diff, method_changes = filter_removed_test_cases(
+        repo_root, changed_files, diff
+    )
+    if not has_relevant_code_changes(changed_files) or has_only_comment_changes(diff):
+        print("No remaining guest-code changes. Guest validation is not required.")
         write_outputs([], [], "", output_file)
         return
 
     has_framework_changes, has_testsuite_changes = get_change_scope(changed_files)
-
-    repo_root = find_repo_root()
     testsuites_dir = find_testsuites_dir(repo_root)
     all_cases = list_test_cases(repo_root, testsuites_dir)
     print(f"Found {len(all_cases)} test cases")
@@ -1913,7 +2096,7 @@ def main() -> None:
         known_tools,
     )
     testsuite_related_cases = get_testsuite_related_cases(
-        all_cases, changed_files, diff
+        all_cases, changed_files, diff, method_changes
     )
     if (
         has_only_unsupported_platform_changes(changed_files)
