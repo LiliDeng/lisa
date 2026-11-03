@@ -1765,6 +1765,7 @@ def write_outputs(
 ) -> None:
     """Write runbook, GitHub Actions outputs, and step summary."""
     from validation_plan import build_validation_plan, parse_explicit_images
+    from validation_report import recommendation_table
 
     case_files: Dict[str, str] = {}
     for path, _, name, _, _, _ in all_cases:
@@ -1813,16 +1814,19 @@ def write_outputs(
     if github_summary:
         with open(github_summary, "a", encoding="utf-8") as f:
             f.write("## AI Test Case Selection\n\n")
-            f.write(f"**Selected {len(validated)} test cases** ")
-            f.write(f"from {len(all_cases)} available\n\n")
-            f.write(f"**Marketplace image:** `{marketplace_image}`\n\n")
-            f.write(f"**Selection status:** `{plan['status']}`: {plan['reason']}\n\n")
-            for recommendation in plan.get("recommendations", []):
-                f.write(
-                    f"- `{recommendation['case']}`: NOT EXECUTED; "
-                    f"{recommendation['platform']}; {recommendation['requirements']} "
-                    f"Reason: {recommendation['reason']}\n"
-                )
+            recommendations = plan.get("recommendations", [])
+            f.write("| Item | Value |\n|---|---|\n")
+            f.write(f"| Selection status | `{plan['status']}` |\n")
+            f.write(f"| Selected for Azure execution | {len(executable)} |\n")
+            f.write(f"| Recommended, not executed | {len(recommendations)} |\n")
+            f.write(f"| Available cases | {len(all_cases)} |\n")
+            f.write(
+                f"| Marketplace image | {marketplace_image or 'Not applicable'} |\n\n"
+            )
+            f.write(plan["reason"] + "\n\n")
+            if recommendations:
+                f.write("### Recommended cases (NOT EXECUTED)\n\n")
+                f.write(recommendation_table(recommendations) + "\n\n")
             for group in groups:
                 f.write(f"### `{group['marketplace_image']}`\n\n")
                 for case_name in group["cases"]:
@@ -1831,13 +1835,13 @@ def write_outputs(
                         f"- `{case_name}` (required={required}): "
                         f"{group['reasons'][case_name]}\n"
                     )
-            if validated:
+            if validated and not recommendations:
                 f.write("| # | Test Case | Area |\n")
                 f.write("|---|-----------|------|\n")
                 area_map = {name: area for _, area, name, _, _, _ in all_cases}
                 for i, name in enumerate(validated, 1):
                     f.write(f"| {i} | `{name}` | {area_map.get(name, '')} |\n")
-            else:
+            elif not validated:
                 f.write("No test cases selected.\n")
 
 

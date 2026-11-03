@@ -10,6 +10,8 @@ import re
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Type, TypedDict
 
+from validation_report import ValidationRecommendation
+
 from lisa.operating_system import OperatingSystem
 from lisa.testselector import _is_os_compatible, _is_platform_compatible
 from lisa.testsuite import TestCaseMetadata, get_cases_metadata
@@ -31,15 +33,6 @@ class ValidationPlan(RecommendationFields):
     status: str
     reason: str
     groups: List[ValidationGroup]
-
-
-class ValidationRecommendation(TypedDict):
-    case: str
-    platform: str
-    requirements: str
-    reason: str
-    required: bool
-    execution_status: str
 
 
 NON_AZURE_SUITES = {

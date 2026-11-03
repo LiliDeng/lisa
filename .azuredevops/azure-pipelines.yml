@@ -205,7 +205,11 @@ jobs:
 
         import json
         import re
+        import sys
         from pathlib import Path
+
+        sys.path.insert(0, str(Path(".github/scripts").resolve()))
+        from validation_report import recommendation_table
 
         def sanitize_vso(value):
             # Strip characters that could inject ADO logging commands.
@@ -246,29 +250,26 @@ jobs:
         image = sanitize_vso("; ".join(images))
 
         print("Selected:", cases)
-        print(f"##vso[task.setvariable variable=CASE_NAMES]{case_names}")
+        print(f"##vso[task.setvariable variable=CASE_NAMES]{case_names or 'None'}")
         print(f"##vso[task.setvariable variable=CASE_COUNT]{len(cases)}")
-        print(f"##vso[task.setvariable variable=MARKETPLACE_IMAGE]{image}")
+        print(f"##vso[task.setvariable variable=MARKETPLACE_IMAGE]{image or 'Not applicable'}")
         print(f"##vso[task.setvariable variable=SELECTION_STATUS]{plan['status']}")
         print(f"##vso[task.setvariable variable=RECOMMENDED_CASE_COUNT]{len(recommendations)}")
-        manual_summary = "; ".join(
-            f"{item['case']} (NOT EXECUTED; {item['platform']}): "
-            f"{item['requirements']} Reason: {item['reason']}"
-            for item in recommendations
-        ) or "None"
+        manual_summary = recommendation_table(recommendations)
+        encoded_summary = (
+            manual_summary.replace("%", "%AZP25")
+            .replace("\r", "%0D")
+            .replace("\n", "%0A")
+        )
         print("##vso[task.setvariable variable=MANUAL_RECOMMENDATIONS]" +
-              sanitize_vso(manual_summary).replace("%", "%AZP25"))
+              encoded_summary)
         if recommendations:
             print("##vso[task.setvariable variable=REGRESSION_SUMMARY]"
                   "MANUAL REQUIRED; NOT EXECUTED; no regression verdict")
             summary_path = Path("ai_selection/manual-recommendations.md").resolve()
             summary_path.write_text(
                 "## Dedicated-platform validation required\n\n" + plan["reason"] +
-                "\n\n" + "\n".join(
-                    f"- `{item['case']}`: **NOT EXECUTED**; {item['platform']}. "
-                    f"{item['requirements']} Reason: {item['reason']}"
-                    for item in recommendations
-                ) + "\n", encoding="utf-8"
+                "\n\n" + manual_summary + "\n", encoding="utf-8"
             )
             print(f"##vso[task.uploadsummary]{summary_path}")
         print("Selection status:", plan["status"], plan["reason"])
@@ -377,16 +378,19 @@ jobs:
           <!-- ai-test-selection -->
           ## AI Test Case Selection
 
-          **Selected $(CASE_COUNT) test case(s):** $(CASE_NAMES)
+          | Item | Result |
+          |---|---|
+          | Selection status | `$(SELECTION_STATUS)` |
+          | Selected for Azure execution | $(CASE_COUNT) |
+          | Recommended, not executed | $(RECOMMENDED_CASE_COUNT) |
+          | Marketplace image | $(MARKETPLACE_IMAGE) |
+          | Pipeline result (not a test verdict) | $(Agent.JobStatus) |
+          | Baseline comparison | $(REGRESSION_SUMMARY) |
 
-          **Selection status:** `$(SELECTION_STATUS)`
+          **Selected cases:** $(CASE_NAMES)
 
-          **Recommended $(RECOMMENDED_CASE_COUNT) case(s) (NOT EXECUTED):** $(MANUAL_RECOMMENDATIONS)
+          ### Recommended cases (NOT EXECUTED)
 
-          **Marketplace image:** `$(MARKETPLACE_IMAGE)`
-
-          **Pipeline result (not a test verdict):** $(Agent.JobStatus)
-
-          **Baseline comparison:** $(REGRESSION_SUMMARY)
+          $(MANUAL_RECOMMENDATIONS)
 
           [View full logs in Azure DevOps]($(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId))

@@ -56,6 +56,10 @@ Selection rules
   suggested tests passed or that regressions were excluded. Dedicated host
   validation remains unexecuted; other selection, CI, or publication errors
   still fail normally.
+  PR comments show a summary table followed by one row per recommended case,
+  including its platform, execution status, prerequisites, and selection reason.
+  The same recommendation table appears in the pipeline summary and the
+  selector's GitHub step summary. Empty images are shown as ``Not applicable``.
 
 Model configuration
 -------------------
