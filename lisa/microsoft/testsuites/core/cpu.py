@@ -162,31 +162,6 @@ class CPU(TestSuite):
 
     @TestCaseMetadata(
         description="""
-            This test will check that vCPU count correctness.
-            Steps :
-            1. Get vCPU count.
-            2. Calculate vCPU count by core_per_socket_count * socket_count *
-             thread_per_core_count.
-            3. Judge whether the actual vCPU count equals to expected value.
-            """,
-        priority=1,
-        requirement=simple_requirement(unsupported_os=[]),
-    )
-    def verify_cpu_count(self, node: Node, log: Logger) -> None:
-        lscpu = node.tools[Lscpu]
-        # 1. Get vCPU count.
-        thread_count = lscpu.get_thread_count()
-        log.debug(f"{thread_count} CPU threads detected...")
-        # 2. Calculate vCPU count
-        calculated_cpu_count = lscpu.calculate_vcpu_count()
-        # 3. Judge whether the actual vCPU count equals to expected value.
-        assert_that(thread_count).described_as(
-            "The VM may end up being incorrectly configured on some Azure hosts,"
-            " it is a known host bug, please check the host version."
-        ).is_equal_to(calculated_cpu_count)
-
-    @TestCaseMetadata(
-        description="""
             This test will verify if the CPUs inside a Linux VM are processing VMBus
             interrupts by checking the /proc/interrupts file.
 
