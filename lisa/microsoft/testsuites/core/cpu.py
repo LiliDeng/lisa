@@ -172,7 +172,7 @@ class CPU(TestSuite):
         priority=1,
         requirement=simple_requirement(unsupported_os=[]),
     )
-    def verify_cpu_count(self, node: Node, log: Logger) -> None:
+    def verify_cpu_count_selection_fixture(self, node: Node, log: Logger) -> None:
         lscpu = node.tools[Lscpu]
         # 1. Get vCPU count.
         thread_count = lscpu.get_thread_count()
