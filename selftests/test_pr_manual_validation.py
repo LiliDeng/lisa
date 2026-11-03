@@ -203,20 +203,11 @@ class ManualValidationTestCase(TestCase):
         for step in steps:
             if step.get("task") in ("AzureCLI@2", "PublishTestResults@2"):
                 self.assertIn("gt(variables['CASE_COUNT'], 0)", step["condition"])
-        gate = next(
-            step
-            for step in steps
-            if step.get("displayName") == "Gate dedicated-platform validation"
+        self.assertFalse(
+            any("manual_required" in step.get("condition", "") for step in steps)
         )
+        comment = next(step for step in steps if step.get("task") == "GitHubComment@0")
         self.assertIn(
-            "eq(variables['SELECTION_STATUS'], 'manual_required')", gate["condition"]
-        )
-        self.assertIn("exit 1", gate["script"])
-        self.assertLess(
-            steps.index(gate),
-            next(
-                index
-                for index, step in enumerate(steps)
-                if step.get("task") == "GitHubComment@0"
-            ),
+            "**Pipeline result (not a test verdict):** $(Agent.JobStatus)",
+            comment["inputs"]["comment"],
         )

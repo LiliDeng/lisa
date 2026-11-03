@@ -362,13 +362,6 @@ jobs:
         PathtoPublish: ai_selection
         ArtifactName: ai-selected-runbook
 
-    - script: |
-        echo "Dedicated-platform validation required. Recommendations are NOT EXECUTED, not PASS."
-        echo "##vso[task.logissue type=error]manual_required: validate recommendations on a prepared platform/host."
-        exit 1
-      displayName: Gate dedicated-platform validation
-      condition: and(always(), eq(variables['SELECTION_STATUS'], 'manual_required'))
-
     - task: GitHubComment@0
       displayName: Comment on GitHub PR (test results)
       condition: >-
@@ -392,7 +385,7 @@ jobs:
 
           **Marketplace image:** `$(MARKETPLACE_IMAGE)`
 
-          **Result:** $(Agent.JobStatus)
+          **Pipeline result (not a test verdict):** $(Agent.JobStatus)
 
           **Baseline comparison:** $(REGRESSION_SUMMARY)
 

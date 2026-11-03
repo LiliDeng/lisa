@@ -51,8 +51,11 @@ Selection rules
   completion. Missing case mappings still fail explicitly.
   The pipeline publishes recommendations in its summary, selection artifact,
   and PR comment without deploying Azure VMs or publishing fake JUnit results.
-  A final manual-validation gate fails: this is neither PASS nor a regression
-  verdict. Dedicated host validation must be supplied separately.
+  Unsupported platforms are recommendation-only and do not fail the pipeline.
+  A successful pipeline means the recommendations were published, not that the
+  suggested tests passed or that regressions were excluded. Dedicated host
+  validation remains unexecuted; other selection, CI, or publication errors
+  still fail normally.
 
 Model configuration
 -------------------
