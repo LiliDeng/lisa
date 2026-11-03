@@ -395,6 +395,11 @@ def run_plan(
 ) -> None:
     repo_root = Path(__file__).resolve().parents[2]
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    if plan["status"] == "manual_required":
+        raise ValueError(
+            "manual_required: recommendations are NOT EXECUTED. "
+            "Use a prepared dedicated platform/host; Azure execution is prohibited."
+        )
     if plan["status"] == "not_required" and not plan["groups"]:
         print(plan["reason"])
         return

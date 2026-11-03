@@ -45,7 +45,7 @@ NON_AZURE_PLATFORM_CHANGE_PATTERNS = (
     re.compile(r"^lisa/sut_orchestrator/(aws|baremetal|hyperv|libvirt|ready)/.+\.py$"),
     re.compile(
         r"^lisa/microsoft/testsuites/"
-        r"(cloud_hypervisor|hyperv|kvm|libvirt|mshv|rust_vmm_mshv)/.+\.py$"
+        r"(cloud_hypervisor|hyperv|kvm|libvirt|mshv|rust_vmm_mshv|openvmm)/.+\.py$"
     ),
 )
 DEFAULT_MARKETPLACE_IMAGE = (
@@ -1792,15 +1792,20 @@ def write_outputs(
     plan_path = output_path.with_suffix(".json")
     plan_path.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
     print(f"Validation plan written to {plan_path}: {json.dumps(plan)}")
-    runbook = generate_runbook(validated, marketplace_image)
+    executable = [
+        name.rsplit(".", 1)[-1] for group in groups for name in group["cases"]
+    ]
+    # Do not leave a runnable legacy fragment for recommendation-only plans.
+    runbook = generate_runbook(executable, marketplace_image)
     output_path.write_text(runbook, encoding="utf-8")
     print(f"Runbook written to {output_path}")
 
     github_output = os.environ.get("GITHUB_OUTPUT", "")
     if github_output:
         with open(github_output, "a", encoding="utf-8") as f:
-            f.write(f"case_count={len(validated)}\n")
-            f.write(f"case_names={','.join(validated)}\n")
+            f.write(f"case_count={len(executable)}\n")
+            f.write(f"case_names={','.join(executable)}\n")
+            f.write(f"selection_status={plan['status']}\n")
             f.write(f"marketplace_image={marketplace_image}\n")
             f.write(f"validation_plan={plan_path}\n")
 
@@ -1811,6 +1816,13 @@ def write_outputs(
             f.write(f"**Selected {len(validated)} test cases** ")
             f.write(f"from {len(all_cases)} available\n\n")
             f.write(f"**Marketplace image:** `{marketplace_image}`\n\n")
+            f.write(f"**Selection status:** `{plan['status']}`: {plan['reason']}\n\n")
+            for recommendation in plan.get("recommendations", []):
+                f.write(
+                    f"- `{recommendation['case']}`: NOT EXECUTED; "
+                    f"{recommendation['platform']}; {recommendation['requirements']} "
+                    f"Reason: {recommendation['reason']}\n"
+                )
             for group in groups:
                 f.write(f"### `{group['marketplace_image']}`\n\n")
                 for case_name in group["cases"]:
@@ -1869,12 +1881,6 @@ def main() -> None:
         write_outputs([], [], "", output_file)
         return
 
-    if has_only_unsupported_platform_changes(changed_files):
-        raise ValueError(
-            "Non-Azure changes need platform-specific validation; "
-            "Azure smoke is not a substitute."
-        )
-
     has_framework_changes, has_testsuite_changes = get_change_scope(changed_files)
 
     repo_root = find_repo_root()
@@ -1905,6 +1911,14 @@ def main() -> None:
     testsuite_related_cases = get_testsuite_related_cases(
         all_cases, changed_files, diff
     )
+    if (
+        has_only_unsupported_platform_changes(changed_files)
+        and not testsuite_related_cases
+    ):
+        raise ValueError(
+            "Non-Azure platform changes have no mapped testsuite cases. "
+            "Add a platform-specific case mapping; Azure smoke is not a substitute."
+        )
     changed_lines_by_file = recover_changed_lines(repo_root, changed_files, diff)
     os_obligations = get_os_method_obligations(
         repo_root, changed_lines_by_file, all_cases

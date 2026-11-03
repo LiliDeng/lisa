@@ -40,6 +40,19 @@ Selection rules
   tests. Missing mappings, unsupported target distributions/platforms, invalid
   model responses with no covered obligations, and model API failures are not
   replaced with a successful-looking smoke run.
+* Known non-Azure suites (including OpenVMM/MSHV host coverage), and cases whose
+  registered platform requirement excludes Azure, produce ``manual_required``.
+  The plan contains suite-qualified ``recommendations`` with platform/host
+  prerequisites, reasons, required-case flags, and ``not_executed`` status.
+  Image/version selection does not turn these cases into ordinary Azure tests.
+  No execution groups or executable legacy filters are emitted. Mixed Azure
+  and dedicated-platform selections are conservatively deferred together;
+  validate the Azure cases separately rather than treating partial coverage as
+  completion. Missing case mappings still fail explicitly.
+  The pipeline publishes recommendations in its summary, selection artifact,
+  and PR comment without deploying Azure VMs or publishing fake JUnit results.
+  A final manual-validation gate fails: this is neither PASS nor a regression
+  verdict. Dedicated host validation must be supplied separately.
 
 Model configuration
 -------------------

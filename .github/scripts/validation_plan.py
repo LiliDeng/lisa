@@ -23,10 +23,90 @@ class ValidationGroup(TypedDict):
     reasons: Dict[str, str]
 
 
-class ValidationPlan(TypedDict):
+class RecommendationFields(TypedDict, total=False):
+    recommendations: List["ValidationRecommendation"]
+
+
+class ValidationPlan(RecommendationFields):
     status: str
     reason: str
     groups: List[ValidationGroup]
+
+
+class ValidationRecommendation(TypedDict):
+    case: str
+    platform: str
+    requirements: str
+    reason: str
+    required: bool
+    execution_status: str
+
+
+NON_AZURE_SUITES = {
+    "cloud_hypervisor": "Cloud Hypervisor host",
+    "hyperv": "Hyper-V host",
+    "kvm": "KVM host",
+    "libvirt": "libvirt host",
+    "mshv": "MSHV host",
+    "rust_vmm_mshv": "MSHV host",
+    "openvmm": "OpenVMM host/platform",
+}
+
+
+def manual_requirements(path: str, case: TestCaseMetadata) -> Tuple[str, str]:
+    parts = path.split("/")
+    platform = NON_AZURE_SUITES.get(parts[-2], "")
+    if platform:
+        if parts[-2] == "openvmm":
+            if case.suite.name == "OpenVmmUpstreamTestSuite":
+                return (
+                    platform,
+                    "Prepared Azure Linux/CBLMariner x86_64 host; accessible "
+                    "/dev/mshv; Intel CPU for linux-intel-mshv; Docker and upstream "
+                    "OpenVMM guest prerequisites. Ordinary Azure VM is insufficient.",
+                )
+            return (
+                platform,
+                "Prepared L1 host and OpenVMM orchestrator with OpenVmmGuestNode; "
+                "platform StartStop support for restart/stop-start cases.",
+            )
+        return platform, f"Prepared {platform}; satisfy the case's real requirements."
+    if not _is_platform_compatible(case, ["azure"]):
+        return (
+            "Non-Azure platform",
+            "Use a platform supported by the registered case requirement.",
+        )
+    return "", ""
+
+
+def manual_plan(
+    case_files: Dict[str, str],
+    metadata: Dict[str, TestCaseMetadata],
+    required_cases: List[str],
+    reasons: Dict[str, str],
+) -> ValidationPlan:
+    recommendations: List[ValidationRecommendation] = []
+    for name, path in case_files.items():
+        platform, requirements = manual_requirements(path, metadata[name])
+        recommendations.append(
+            {
+                "case": metadata[name].full_name,
+                "platform": platform or "Azure",
+                "requirements": requirements
+                or "Azure-compatible case deferred with this mixed-platform plan; "
+                "validate separately using reviewed images and real requirements.",
+                "reason": reasons.get(name, "AI-ranked related case"),
+                "required": name in required_cases,
+                "execution_status": "not_executed",
+            }
+        )
+    return {
+        "status": "manual_required",
+        "reason": "Selected cases require a platform/host outside this Azure pipeline. "
+        "Dedicated-platform validation is required; no guest tests were executed.",
+        "groups": [],
+        "recommendations": recommendations,
+    }
 
 
 def reviewed_images(repo_root: Path) -> List[str]:
@@ -231,6 +311,31 @@ def build_validation_plan(
             "groups": [],
         }
     metadata = load_metadata(repo_root, case_files)
+    if any(
+        manual_requirements(path, metadata[name])[0]
+        for name, path in case_files.items()
+    ):
+        return manual_plan(case_files, metadata, required_cases, reasons)
+    return _azure_validation_plan(
+        repo_root,
+        case_files,
+        required_cases,
+        reasons,
+        changed_lines,
+        explicit_images,
+        metadata,
+    )
+
+
+def _azure_validation_plan(
+    repo_root: Path,
+    case_files: Dict[str, str],
+    required_cases: List[str],
+    reasons: Dict[str, str],
+    changed_lines: Dict[str, Set[int]],
+    explicit_images: List[str],
+    metadata: Dict[str, TestCaseMetadata],
+) -> ValidationPlan:
     os_names, context = changed_os_context(repo_root, changed_lines)
     catalog = reviewed_images(repo_root)
     candidates = _image_candidates(catalog, context, explicit_images)
