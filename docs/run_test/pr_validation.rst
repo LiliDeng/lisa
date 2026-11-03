@@ -5,6 +5,11 @@ The Azure DevOps PR pipeline uses ``.github/scripts/ai_select_cases.py`` to
 produce ``ai_selection/ai_selected_cases.json``. This plan, rather than the
 legacy YAML selection fragment, is the authoritative input to execution.
 
+Automatic validation targets pull requests into ``main``. Draft pull requests
+do not trigger runs (``pr.drafts: false``), including model selection and guest
+execution. Mark a PR ready for review to enable normal PR validation. This
+trigger filter does not prevent an explicitly queued manual run.
+
 Selection rules
 ---------------
 

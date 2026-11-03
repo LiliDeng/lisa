@@ -2,6 +2,7 @@ trigger: none
 
 pr:
   autoCancel: true
+  drafts: false
   branches:
     include:
       - main
