@@ -16,6 +16,8 @@ parameters:
     displayName: 'Explicit reviewed Marketplace images (JSON array, optional)'
 
 variables:
+  - name: REGRESSION_SUMMARY
+    value: 'Not executed or no guest tests required'
   - name: pythonVersion
     value: '3.12'
 
@@ -143,8 +145,11 @@ jobs:
         git fetch origin "$TARGET"
 
         BASE=$(git merge-base HEAD "origin/$TARGET")
+        HEAD_SHA=$(git rev-parse HEAD)
 
         echo "Merge base: $BASE"
+        echo "##vso[task.setvariable variable=BASE_SHA]$BASE"
+        echo "##vso[task.setvariable variable=HEAD_SHA]$HEAD_SHA"
 
         git diff --name-only "$BASE"...HEAD \
           | tee /tmp/changed_files.txt
@@ -248,20 +253,64 @@ jobs:
           python .github/scripts/run_selected_cases.py \
             --plan ai_selection/ai_selected_cases.json \
             --runbook "$(runbook)" \
-            --location "$(location)"
+            --location "$(location)" \
+            --base-sha "$(BASE_SHA)"
 
     - script: |
-        echo "Selected $(CASE_COUNT) test cases."
+        python <<'PY'
+        import json
+        import os
+        from pathlib import Path
+
+        path = Path("ai_selection/pr_validation_results.json")
+        if not path.exists():
+            raise RuntimeError("No validation comparison report was produced.")
+        results = json.loads(path.read_text())
+        if not results or any(r["status"] == "running" for r in results):
+            raise RuntimeError("Validation comparison report is incomplete.")
+        counts = {}
+        for group in results:
+            print(group["image"], group["status"], group["details"])
+            for name, case in group["cases"].items():
+                verdict = case["comparison"]
+                counts[verdict] = counts.get(verdict, 0) + 1
+                print(name, verdict, "head:", case["head"]["status"],
+                      "base:", case.get("base", {}).get("status", "not run"))
+        summary = "; ".join(f"{key}: {value}" for key, value in sorted(counts.items()))
+        if any(r["status"] == "failed" for r in results):
+            summary = "BLOCKED; " + summary
+        else:
+            summary = "No new failure observed; " + summary
+        print(f"##vso[task.setvariable variable=REGRESSION_SUMMARY]{summary}")
+        summary_file = Path(os.environ["BUILD_ARTIFACTSTAGINGDIRECTORY"]) / "regression.md"
+        summary_file.write_text(
+            "## Failure-triggered baseline comparison\n\n" + summary +
+            "\n\n`same_failure` is not a test PASS or proof of no regression. "
+            "A common failure can mask later failures. See the JSON/runtime artifacts.\n"
+        )
+        print(f"##vso[task.uploadsummary]{summary_file}")
+        PY
       displayName: Summary
+      condition: and(always(), gt(variables['CASE_COUNT'], 0))
 
     - task: PublishTestResults@2
       displayName: Publish JUnit Results
       condition: and(always(), gt(variables['CASE_COUNT'], 0))
       inputs:
         testResultsFormat: JUnit
-        testResultsFiles: '**/lisa.junit.xml'
-        failTaskOnFailedTests: true
-        testRunTitle: 'LISA Test Results'
+        testResultsFiles: 'runtime/pr-validation/head/**/lisa.junit.xml'
+        # The runner gates on the comparison; raw failures stay visible here.
+        failTaskOnFailedTests: false
+        testRunTitle: 'LISA PR Head Results'
+
+    - task: PublishTestResults@2
+      displayName: Publish Baseline JUnit Results
+      condition: and(always(), gt(variables['CASE_COUNT'], 0))
+      inputs:
+        testResultsFormat: JUnit
+        testResultsFiles: 'runtime/pr-validation/base/**/lisa.junit.xml'
+        failTaskOnFailedTests: false
+        testRunTitle: 'LISA Fixed Base Results'
 
     - task: PublishBuildArtifacts@1
       displayName: Publish Runtime Artifacts
@@ -297,5 +346,7 @@ jobs:
           **Marketplace image:** `$(MARKETPLACE_IMAGE)`
 
           **Result:** $(Agent.JobStatus)
+
+          **Baseline comparison:** $(REGRESSION_SUMMARY)
 
           [View full logs in Azure DevOps]($(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId))
