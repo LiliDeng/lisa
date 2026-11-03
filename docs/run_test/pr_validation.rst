@@ -10,6 +10,10 @@ do not trigger runs (``pr.drafts: false``), including model selection and guest
 execution. Mark a PR ready for review to enable normal PR validation. This
 trigger filter does not prevent an explicitly queued manual run.
 
+PR triggers read the YAML in the PR source branch. Existing branches must pick
+up this configuration, for example by merging the latest ``main``, for the
+Draft filter to apply.
+
 Selection rules
 ---------------
 
