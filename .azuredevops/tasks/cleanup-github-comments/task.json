@@ -1,0 +1,38 @@
+{
+  "id": "a0b902db-1657-4b1d-b26c-b71e1e5455e7",
+  "name": "CleanupGitHubComments",
+  "friendlyName": "Keep the latest LISA PR report",
+  "description": "Remove older automatic reports using the existing GitHub OAuth connection.",
+  "author": "LISA",
+  "category": "Utility",
+  "visibility": ["Build"],
+  "version": {"Major": 0, "Minor": 1, "Patch": 0},
+  "minimumAgentVersion": "3.232.0",
+  "instanceNameFormat": "Keep the latest automatic PR report",
+  "inputs": [
+    {
+      "name": "gitHubConnection",
+      "type": "connectedService:github:OAuth",
+      "label": "Existing GitHub OAuth connection",
+      "required": true
+    },
+    {
+      "name": "repositoryName",
+      "type": "string",
+      "label": "Repository",
+      "required": true
+    },
+    {"name": "id", "type": "string", "label": "PR number", "required": true},
+    {"name": "buildId", "type": "string", "label": "Build ID", "required": true},
+    {
+      "name": "jobAttempt",
+      "type": "string",
+      "label": "Job attempt",
+      "required": true
+    }
+  ],
+  "execution": {
+    "Node20_1": {"target": "main.js"},
+    "Node24": {"target": "main.js"}
+  }
+}
