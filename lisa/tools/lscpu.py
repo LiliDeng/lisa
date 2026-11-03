@@ -178,12 +178,12 @@ class Lscpu(Tool):
 
     def get_thread_count(self, force_run: bool = False) -> int:
         result = self.run(force_run=force_run)
-        matched = self.__vcpu.findall(result.stdout)
+        cpu_matches = self.__vcpu.findall(result.stdout)
         assert_that(
-            len(matched),
-            f"cpu count should have exact one line, but got {matched}",
+            len(cpu_matches),
+            f"cpu count should have exact one line, but got {cpu_matches}",
         ).is_equal_to(1)
-        self._thread_count = int(matched[0][1])
+        self._thread_count = int(cpu_matches[0][1])
 
         return self._thread_count
 
