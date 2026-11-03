@@ -184,6 +184,7 @@ class CPU(TestSuite):
             "The VM may end up being incorrectly configured on some Azure hosts,"
             " it is a known host bug, please check the host version."
         ).is_equal_to(calculated_cpu_count)
+        raise LisaException("Intentional PR baseline validation fixture failure.")
 
     @TestCaseMetadata(
         description="""
