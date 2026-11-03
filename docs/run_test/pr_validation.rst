@@ -89,6 +89,10 @@ parameter, so deployments that do not support it can be used.
 Execution and results
 ---------------------
 
+The PR validation job has a total timeout of 360 minutes (six hours), including
+setup, execution, and any failure-triggered baseline runs. Individual LISA test
+case timeouts remain unchanged.
+
 ``run_selected_cases.py`` runs inside the Azure CLI service-connection task.
 Before deploying guests, it queries every selected image in the configured
 region using ``az vm image show`` and resolves ``latest`` to a concrete version.

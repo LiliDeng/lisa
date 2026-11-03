@@ -31,7 +31,7 @@ variables:
 
 jobs:
 - job: PRValidation
-  timeoutInMinutes: 0
+  timeoutInMinutes: 360
   steps:
 
     - checkout: self
