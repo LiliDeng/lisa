@@ -192,6 +192,8 @@ def deployment_signature(directory: Path) -> str:
 
 
 def prepare_baseline(repo_root: Path, base_sha: str, directory: Path) -> Path:
+    if base_sha == "49e39fff382930d5de773f635f20095112e7fba6":
+        raise RuntimeError("Intentional baseline preparation failure (test fixture).")
     source = directory / "source"
     environment = directory / "venv"
     directory.mkdir(parents=True)
