@@ -34,9 +34,25 @@ OPENVMM = {
         "lisa/microsoft/testsuites/openvmm/openvmm.py"
     ),
 }
+REAL_METADATA = plans.load_metadata(
+    ROOT,
+    {
+        **OPENVMM,
+        "verify_cpu_count": "lisa/microsoft/testsuites/core/cpu.py",
+    },
+)
 
 
 class ManualValidationTestCase(TestCase):
+    def setUp(self) -> None:
+        # Framework selftests clear global registries after modules are imported.
+        registry = {case.full_name: case for case in REAL_METADATA.values()}
+        metadata_patch = patch.object(
+            plans, "get_cases_metadata", return_value=registry
+        )
+        metadata_patch.start()
+        self.addCleanup(metadata_patch.stop)
+
     def test_real_openvmm_metadata_produces_actionable_recommendations(self) -> None:
         with patch.object(plans, "reviewed_images") as reviewed:
             plan = plans.build_validation_plan(ROOT, OPENVMM, list(OPENVMM), {}, {}, [])
