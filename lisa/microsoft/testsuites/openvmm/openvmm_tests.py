@@ -86,6 +86,7 @@ class OpenVmmUpstreamTestSuite(TestSuite):
     @TestCaseMetadata(
         description="""
         Run the upstream OpenVMM vmm_tests flowey pipeline on the Linux x64 host.
+        Validate this coverage on the dedicated OpenVMM host.
         Use openvmm_vmm_tests_guest_os=linux|windows|all to scope guest coverage,
         and openvmm_vmm_tests_filter for any additional nextest filter expression.
         Native Linux hosts automatically exclude PCAT coverage because upstream
