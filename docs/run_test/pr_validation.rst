@@ -39,6 +39,11 @@ Selection rules
   OS change as an unrelated smoke-test request.
 * The selector imports only the selected testsuite modules and checks their
   registered OS and platform requirements. Ambiguous method names are errors.
+  Before importing, it registers LISA's built-in ``microsoft`` extension
+  namespace so existing ``microsoft.testsuites`` helper imports resolve in the
+  pipeline's editable-install environment. This does not preload all suites or
+  require an extra ``PYTHONPATH`` entry. Repository provenance checks remain
+  enforced for selected modules.
 * Images come exclusively from the reviewed list in
   ``.github/copilot-instructions.md``. Changed OS classes and enclosing OS
   branches constrain image selection. For example, a SUSE-specific change cannot

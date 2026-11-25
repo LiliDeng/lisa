@@ -16,6 +16,7 @@ from lisa.operating_system import OperatingSystem
 from lisa.testselector import _is_os_compatible, _is_platform_compatible
 from lisa.testsuite import TestCaseMetadata, get_cases_metadata
 from lisa.util.os_resolver import infer_target_os, resolve_os_class
+from lisa.util.package import _import_root_package
 
 
 class ValidationGroup(TypedDict):
@@ -127,6 +128,9 @@ def reviewed_images(repo_root: Path) -> List[str]:
 def load_metadata(
     repo_root: Path, case_files: Dict[str, str]
 ) -> Dict[str, TestCaseMetadata]:
+    # Match LISA's builtin extension namespace without importing every suite.
+    if case_files:
+        _import_root_package("microsoft", repo_root / "lisa" / "microsoft")
     for path in sorted(set(case_files.values())):
         module = importlib.import_module(path.removesuffix(".py").replace("/", "."))
         if Path(module.__file__ or "").resolve() != (repo_root / path).resolve():
