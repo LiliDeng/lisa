@@ -37,8 +37,17 @@ Selection rules
   to find direct test callers. For example, changing ``Suse._update_packages``
   recalls tests that call ``node.os.update_packages``, rather than treating the
   OS change as an unrelated smoke-test request.
-* The selector imports only the selected testsuite modules and checks their
-  registered OS and platform requirements. Ambiguous method names are errors.
+* The selector uses ``Suite.method`` identifiers throughout discovery, model
+  selection, metadata lookup and execution. Equal method names in different
+  suites remain separate cases. Bare method names resolve to all same-named
+  candidates instead of raising an ambiguity error. After selection, any
+  selected method expands to all same-named cases in the repository inventory,
+  including when only one suite calls the changed code or is selected by the
+  model. Required-case coverage expands in the same way. Each resulting case
+  retains its suite-qualified identity for metadata and execution. This
+  expansion occurs after model selection and can add cases beyond its budget.
+  The selector imports only the selected testsuite modules and checks their
+  registered OS and platform requirements.
   Before importing, it registers LISA's built-in ``microsoft`` extension
   namespace so existing ``microsoft.testsuites`` helper imports resolve in the
   pipeline's editable-install environment. This does not preload all suites or
@@ -121,8 +130,14 @@ Before deploying guests, it queries every selected image in the configured
 region using ``az vm image show`` and resolves ``latest`` to a concrete version.
 An unavailable target fails validation rather than switching distributions.
 
-Groups run sequentially with exact method-name filters. The plan records
-suite-qualified identities and rejects ambiguous method names. LISA retains
+Groups run sequentially with exact ``criteria.full_name`` filters. Existing
+``criteria.name`` filters continue to match method names. The plan records
+suite-qualified identities so selecting one case does not execute another
+suite's same-named method. Generated YAML fragments include stable/preview
+maturity, matching the validation runner. Older baseline runbooks use legacy
+method filters only when they select exactly the planned suite-qualified cases;
+otherwise comparison fails explicitly instead of running an unintended case.
+LISA retains
 responsibility for VM capability/SKU matching; the selector's preflight checks
 OS and platform, not every hardware or runtime prerequisite. Both stable and
 preview cases can be selected so directly changed preview tests are not silently

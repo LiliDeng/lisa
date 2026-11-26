@@ -144,7 +144,8 @@ def load_metadata(
         matches = [
             case
             for case in registered.values()
-            if case.name == name
+            if case.name == name.rsplit(".", 1)[-1]
+            and ("." not in name or case.full_name == name)
             and case.suite.name == case.full_name.rsplit(".", 1)[0]
             and getattr(case.suite.test_class, "__module__", "") == module_name
         ]

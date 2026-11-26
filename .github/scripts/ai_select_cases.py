@@ -520,7 +520,7 @@ def _without_removed_test_cases(
 
     # Text diff anchors can land in an unchanged neighbor after a method deletion.
     changed_methods = [
-        method.name
+        f"{key[0]}.{key[1]}"
         for key, method in new_methods.items()
         if key not in old_methods or ast.dump(old_methods[key]) != ast.dump(method)
     ]
@@ -814,7 +814,11 @@ def list_test_cases(
         in_case_meta = False
         priority = 99
         case_metadata_lines: List[str] = []
+        suite_name = ""
         for line_no, line in enumerate(lines, start=1):
+            suite_match = re.match(r"class (\w+)", line)
+            if suite_match:
+                suite_name = suite_match.group(1)
             if "@TestSuiteMetadata" in line:
                 in_suite_meta = True
             if in_suite_meta:
@@ -841,7 +845,7 @@ def list_test_cases(
                         (
                             rel,
                             area,
-                            m.group(1),
+                            f"{suite_name}.{m.group(1)}",
                             priority,
                             _extract_supported_features(metadata_block),
                             case_tools_by_line.get(line_no, ()),
@@ -925,7 +929,7 @@ def _get_test_method_changes(
                     _decorator_name(decorator) == "TestCaseMetadata"
                     for decorator in child.decorator_list
                 ):
-                    modified_test_cases.append(method_name)
+                    modified_test_cases.append(f"{node.name}.{method_name}")
 
     return modified_test_cases, shared_method_changed
 
@@ -1091,7 +1095,7 @@ def _case_os_calls(source: ast.Module, affected: Set[str]) -> Dict[str, Set[str]
                 for item in child.decorator_list
             ):
                 continue
-            result[child.name] = _resolve_function_tools(
+            result[f"{cls.name}.{child.name}"] = _resolve_function_tools(
                 (cls.name, child.name), direct, self_calls, plain_calls, {}, set()
             )
     return result
@@ -1161,7 +1165,8 @@ SELECTION_SYSTEM_PROMPT = (
     "- Return [] if no candidate covers the change; do not substitute smoke_test\n"
     "- Include related integration tests\n"
     "- Be conservative: include cases that MIGHT be affected\n"
-    "Return ONLY a JSON array of test case name strings, no explanation."
+    "Return ONLY a JSON array of exact Suite.method identifiers from the "
+    "provided candidate list, no explanation."
 )
 
 
@@ -1286,7 +1291,8 @@ def generate_runbook(case_names: List[str], marketplace_image: str = "") -> str:
     for name in case_names:
         lines += [
             "  - criteria:",
-            f'      name: "{name}"',
+            f"      full_name: {json.dumps(re.escape(name))}",
+            "      maturity: [stable, preview]",
         ]
     return "\n".join(lines) + "\n"
 
@@ -1402,8 +1408,8 @@ def build_prompt(
         f"{testsuite_guidance}\n"
         f"{feature_guidance}\n"
         f"{tool_guidance}\n"
-        "Return a JSON array of case names only, e.g. "
-        '["smoke_test", "verify_cpu_count"].'
+        "Return a JSON array of exact suite-qualified case identifiers only, e.g. "
+        '["CPU.verify_cpu_count"]. Do not strip the suite name.'
     )
 
 
@@ -1434,19 +1440,39 @@ def build_case_summary(
     return "\n".join(lines)
 
 
+def resolve_case_names(selected: List[str], candidates: List[str]) -> List[str]:
+    resolved: List[str] = []
+    candidate_set = set(candidates)
+    for name in selected:
+        if "." in name and name not in candidate_set:
+            resolved.append(name)
+            continue
+        matches = [
+            candidate
+            for candidate in candidates
+            if candidate.rsplit(".", 1)[-1] == name.rsplit(".", 1)[-1]
+        ]
+        resolved.extend(matches or [name])
+    return list(dict.fromkeys(resolved))
+
+
 def _is_smoke_case(case_name: str) -> bool:
+    case_name = case_name.rsplit(".", 1)[-1]
     return case_name == "smoke_test" or case_name.startswith("smoke_")
 
 
 def _is_stress_case(case_name: str) -> bool:
+    case_name = case_name.rsplit(".", 1)[-1]
     return case_name.startswith("stress_")
 
 
 def _is_perf_case(case_name: str) -> bool:
+    case_name = case_name.rsplit(".", 1)[-1]
     return case_name.startswith("perf_")
 
 
 def _is_verify_case(case_name: str) -> bool:
+    case_name = case_name.rsplit(".", 1)[-1]
     return case_name.startswith("verify_")
 
 
@@ -1581,7 +1607,9 @@ def parse_ai_response(response: str) -> List[str]:
         return []
     valid: List[str] = []
     for item in parsed:
-        if isinstance(item, str) and re.fullmatch(r"[A-Za-z0-9_]+", item):
+        if isinstance(item, str) and re.fullmatch(
+            r"[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)?", item
+        ):
             valid.append(item)
         else:
             print(f"WARNING: dropping malformed AI-selected case: {item!r}")
@@ -1618,9 +1646,12 @@ def apply_smoke_fallback(
         return non_smoke_cases
 
     valid_names = {name for _, _, name, _, _, _ in all_cases}
-    if "smoke_test" in valid_names:
+    smoke_cases = sorted(
+        name for name in valid_names if name.rsplit(".", 1)[-1] == "smoke_test"
+    )
+    if smoke_cases:
         print("No targeted cases remained. Falling back to smoke_test.")
-        return ["smoke_test"]
+        return smoke_cases
 
     return []
 
@@ -1948,13 +1979,20 @@ def write_outputs(
     from validation_plan import build_validation_plan, parse_explicit_images
     from validation_report import recommendation_table
 
+    inventory_names = [entry[2] for entry in all_cases]
+    expanded = resolve_case_names(validated, inventory_names)
+    additional = [name for name in expanded if name not in validated]
+    if additional:
+        print(f"Including all same-named cases from the inventory: {additional}")
+    validated = expanded
+    required_cases = resolve_case_names(required_cases or [], inventory_names)
     case_files: Dict[str, str] = {}
     for path, _, name, _, _, _ in all_cases:
         if name not in validated:
             continue
         if name in case_files and case_files[name] != path:
             raise ValueError(
-                f"Selected method name {name!r} is ambiguous across suites."
+                f"Selected case identifier {name!r} is ambiguous across files."
             )
         case_files[name] = path
     if set(validated) != set(case_files):
@@ -1974,9 +2012,7 @@ def write_outputs(
     plan_path = output_path.with_suffix(".json")
     plan_path.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
     print(f"Validation plan written to {plan_path}: {json.dumps(plan)}")
-    executable = [
-        name.rsplit(".", 1)[-1] for group in groups for name in group["cases"]
-    ]
+    executable = [name for group in groups for name in group["cases"]]
     # Do not leave a runnable legacy fragment for recommendation-only plans.
     runbook = generate_runbook(executable, marketplace_image)
     output_path.write_text(runbook, encoding="utf-8")
@@ -2220,6 +2256,7 @@ def main() -> None:
     selected_cases = parse_ai_response(response)
 
     candidate_name_set = set(candidate_case_names)
+    selected_cases = resolve_case_names(selected_cases, candidate_case_names)
 
     validated = [c for c in selected_cases if c in candidate_name_set]
     invalid = [c for c in selected_cases if c not in candidate_name_set]
