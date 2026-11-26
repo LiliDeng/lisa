@@ -17,9 +17,15 @@ Draft filter to apply.
 Selection rules
 ---------------
 
-* Changed test methods, including metadata edits, are required. Shared helper
-  edits conservatively include cases from the affected file or testsuite area.
-  Changes in multiple files are accumulated.
+* Changed test methods, including metadata edits, remain independently required.
+  Shared helper edits use scoped, transitive caller mappings. A straight-line
+  shared path needs one representative caller; a case covering multiple changed
+  paths is preferred. Conditional helpers and changes without a guaranteed
+  caller mapping retain conservative coverage rather than assuming that one
+  case validates every branch. Guarded calls are not counted as guaranteed,
+  and callers with different OS/platform/feature requirements are not collapsed.
+  Changes in multiple files are accumulated, and all mapped obligations must
+  still have a selected case.
 * Removing complete decorated test methods without changing remaining code
   produces ``not_required`` with no model call or guest execution. Complete
   test-only suite/file removals are also skipped; deleted helper or other
@@ -40,12 +46,12 @@ Selection rules
 * The selector uses ``Suite.method`` identifiers throughout discovery, model
   selection, metadata lookup and execution. Equal method names in different
   suites remain separate cases. Bare method names resolve to all same-named
-  candidates instead of raising an ambiguity error. After selection, any
-  selected method expands to all same-named cases in the repository inventory,
-  including when only one suite calls the changed code or is selected by the
-  model. Required-case coverage expands in the same way. Each resulting case
-  retains its suite-qualified identity for metadata and execution. This
-  expansion occurs after model selection and can add cases beyond its budget.
+  candidates instead of raising an ambiguity error. A suite-qualified selection
+  retains that exact case; it does not automatically expand to other suites'
+  same-named methods. Bare names resolve to candidate identities and are subject
+  to the same coverage requirements. Names alone cannot establish caller
+  equivalence. Each selected case retains its suite-qualified identity for
+  metadata and execution.
   The selector imports only the selected testsuite modules and checks their
   registered OS and platform requirements.
   Before importing, it registers LISA's built-in ``microsoft`` extension
