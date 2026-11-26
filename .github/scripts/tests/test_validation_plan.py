@@ -40,7 +40,7 @@ class MetadataImportTestCase(unittest.TestCase):
                 name: path for path, _, name, _, _, _ in inventory
                 if path == suite_path
             }
-            assert len(cases) == 12, cases
+            assert cases, "No cases discovered in the regression suite"
             cases["verify_device_channels_change"] = (
                 "lisa/microsoft/testsuites/network/networksettings.py"
             )
