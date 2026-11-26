@@ -172,6 +172,40 @@ def _os_names(node: ast.AST) -> Set[str]:
     return result
 
 
+def changed_class_attributes(
+    source: ast.Module, lines: Set[int]
+) -> List[Tuple[ast.ClassDef, ast.stmt, str, List[ast.Attribute]]]:
+    changes: List[Tuple[ast.ClassDef, ast.stmt, str, List[ast.Attribute]]] = []
+    for owner in source.body:
+        if not isinstance(owner, ast.ClassDef):
+            continue
+        for statement in owner.body:
+            if not isinstance(statement, (ast.Assign, ast.AnnAssign)) or not any(
+                statement.lineno <= line <= (statement.end_lineno or statement.lineno)
+                for line in lines
+            ):
+                continue
+            targets = (
+                statement.targets
+                if isinstance(statement, ast.Assign)
+                else [statement.target]
+            )
+            for target in targets:
+                if not isinstance(target, ast.Name):
+                    continue
+                references = [
+                    node
+                    for node in ast.walk(owner)
+                    if isinstance(node, ast.Attribute)
+                    and isinstance(node.ctx, ast.Load)
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id in ("self", "cls", owner.name)
+                    and node.attr == target.id
+                ]
+                changes.append((owner, statement, target.id, references))
+    return changes
+
+
 def changed_os_context(
     repo_root: Path, changed_lines: Dict[str, Set[int]]
 ) -> Tuple[Set[str], str]:
@@ -184,6 +218,9 @@ def changed_os_context(
             continue
         source = file_path.read_text(encoding="utf-8")
         tree = ast.parse(source)
+        line_numbers = set(line_numbers)
+        for _, _, _, references in changed_class_attributes(tree, line_numbers):
+            line_numbers.update(node.lineno for node in references)
         nodes = list(ast.walk(tree))
         for line in sorted(line_numbers):
             enclosing = [

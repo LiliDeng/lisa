@@ -26,6 +26,11 @@ Selection rules
   and callers with different OS/platform/feature requirements are not collapsed.
   Changes in multiple files are accumulated, and all mapped obligations must
   still have a selected case.
+  Declarative Tool attributes are traced through the Tool installation path.
+  Cases retrieving that Tool share an installation obligation, so changing a
+  dependency list does not require running every filesystem variant. Attributes
+  used only in unrelated or unresolved conditional paths retain conservative
+  coverage. Within mapped alternatives, lower-cost requirements are preferred.
 * Removing complete decorated test methods without changing remaining code
   produces ``not_required`` with no model call or guest execution. Complete
   test-only suite/file removals are also skipped; deleted helper or other
@@ -63,6 +68,8 @@ Selection rules
   ``.github/copilot-instructions.md``. Changed OS classes and enclosing OS
   branches constrain image selection. For example, a SUSE-specific change cannot
   fall back to Ubuntu. Compatible cases are grouped by image.
+  For changed class attributes, the selector follows their read sites into OS
+  branches; the attribute's name alone does not determine the target OS.
 * Version comparisons or changes affecting both architectures/generations need
   explicit images. Set the pipeline's ``validationImages`` parameter to a JSON
   array of exact strings from the reviewed list, for example:

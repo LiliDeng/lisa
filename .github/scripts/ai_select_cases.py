@@ -2048,6 +2048,141 @@ def _case_validation_requirements(source: ast.Module) -> Dict[str, Tuple[str, ..
     }
 
 
+def _os_guarded_path(node: ast.AST, parents: Dict[ast.AST, ast.AST]) -> bool:
+    from validation_plan import _os_names
+
+    while node in parents:
+        node = parents[node]
+        if isinstance(node, ast.If):
+            if not _os_names(node.test):
+                return False
+        elif isinstance(
+            node,
+            (
+                ast.IfExp,
+                ast.BoolOp,
+                ast.For,
+                ast.AsyncFor,
+                ast.While,
+                ast.Try,
+                ast.ListComp,
+                ast.SetComp,
+                ast.DictComp,
+                ast.GeneratorExp,
+                ast.Lambda,
+            ),
+        ):
+            return False
+        elif type(node).__name__ in ("Match", "TryStar"):
+            return False
+    return True
+
+
+def _tool_install_reads(owner: ast.ClassDef, attribute: str) -> bool:
+    if any(
+        isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, ast.Store)
+        and isinstance(node.value, ast.Name)
+        and node.value.id in ("self", "cls", owner.name)
+        and node.attr == attribute
+        for node in ast.walk(owner)
+    ):
+        return False
+    if not any(
+        isinstance(base, (ast.Name, ast.Attribute))
+        and (base.id if isinstance(base, ast.Name) else base.attr) == "Tool"
+        for base in owner.bases
+    ):
+        return False
+    functions = _testsuite_functions(ast.Module(body=[owner], type_ignores=[]))
+    if not any(
+        node.name == "can_install"
+        and len(node.body) == 1
+        and isinstance(node.body[0], ast.Return)
+        and isinstance(node.body[0].value, ast.Constant)
+        and node.body[0].value.value is True
+        for _, node in functions
+    ):
+        return False
+    parents = {
+        child: node for node in ast.walk(owner) for child in ast.iter_child_nodes(node)
+    }
+    direct: Dict[Tuple[str, str], Set[str]] = {}
+    calls: Dict[Tuple[str, str], Set[str]] = {}
+    for scope, function in functions:
+        key = (scope, function.name)
+        direct[key] = {
+            attribute
+            for node in ast.walk(function)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.ctx, ast.Load)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "self"
+            and node.attr == attribute
+            and _os_guarded_path(node, parents)
+        }
+        calls[key] = {
+            node.func.attr
+            for node in ast.walk(function)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "self"
+            and _os_guarded_path(node, parents)
+        }
+    return attribute in _resolve_function_tools(
+        (owner.name, "_install"), direct, calls, {}, {}, set()
+    )
+
+
+def _tool_attribute_coverage(
+    source: ast.Module,
+    lines: Set[int],
+    related: List[str],
+    all_cases: List[Tuple[str, str, str, int, Tuple[str, ...], Tuple[str, ...]]],
+    path: str,
+) -> Tuple[Set[int], Dict[str, List[str]]]:
+    from validation_plan import changed_class_attributes
+
+    covered: Set[int] = set()
+    obligations: Dict[str, List[str]] = {}
+    for owner, statement, attribute, references in changed_class_attributes(
+        source, lines
+    ):
+        value = (
+            statement.value
+            if isinstance(statement, (ast.Assign, ast.AnnAssign))
+            else None
+        )
+        if (
+            not references
+            or not isinstance(
+                value, (ast.Constant, ast.List, ast.Tuple, ast.Set, ast.Dict)
+            )
+            or any(isinstance(node, ast.Call) for node in ast.walk(value))
+            or _has_conditional_logic(value)
+            or not _tool_install_reads(owner, attribute)
+        ):
+            continue
+        candidates = [
+            name
+            for _, _, name, _, _, tools in all_cases
+            if name in related and owner.name in tools
+        ]
+        if candidates:
+            covered.update(
+                line
+                for line in lines
+                if statement.lineno
+                <= line
+                <= (statement.end_lineno or statement.lineno)
+            )
+            obligations[
+                f"Changed tool installation attribute {path}:{owner.name}.{attribute}"
+            ] = candidates
+    return covered, obligations
+
+
 def testsuite_coverage(
     repo_root: Path,
     changed_lines: Dict[str, Set[int]],
@@ -2088,7 +2223,12 @@ def testsuite_coverage(
             <= line
             <= (node.end_lineno or node.lineno)
         }
-        if covered != lines or not functions:
+        attribute_lines, attribute_obligations = _tool_attribute_coverage(
+            source, lines, candidates, all_cases, path
+        )
+        covered.update(attribute_lines)
+        obligations.update(attribute_obligations)
+        if covered != lines or (not functions and not attribute_obligations):
             print(f"No precise shared-path mapping for {path}; retaining its cases.")
             mandatory.extend(candidates)
             continue
@@ -2147,6 +2287,10 @@ def ensure_required_coverage(
         if not candidates:
             raise ValueError(f"No test covers {reason}; manual validation required.")
     priority = {name: value for _, _, name, value, _, _ in all_cases}
+    cost = {
+        name: (len(features), len(tools), index)
+        for index, (_, _, name, _, features, tools) in enumerate(all_cases)
+    }
     while obligations:
         covering_cases = set(chain.from_iterable(items for _, items in obligations))
         name = min(
@@ -2156,6 +2300,7 @@ def ensure_required_coverage(
                 -sum(item in items for _, items in obligations),
                 item not in selected,
                 priority.get(item, 99),
+                cost.get(item, (99, 99, len(all_cases))),
                 item,
             ),
         )
